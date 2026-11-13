@@ -88,3 +88,26 @@ were changed during the investigation.
 
 - [Android emulator graphics acceleration](https://developer.android.com/studio/run/emulator-acceleration)
 - [Android emulator troubleshooting](https://developer.android.com/studio/run/emulator-troubleshooting)
+
+## Recurrence — 13 November 2026, 15:05:50 IST
+
+A second QEMU crash (PID 258244; core stored at 15:06:15) has the same faulting
+CUDA/H.264 stack: `libcuda.so`, `cuMemcpy2D_v2`, `media_cuda_utils_nv12_updater`,
+`MediaCudaVideoHelper::HandlePictureDisplay`, and `MediaH264DecoderGeneric::decodeFrame`.
+The host NVIDIA driver logged `NV_ERR_NO_MEMORY` immediately before the segmentation fault.
+
+The launch command was `-avd a34play -camera-back webcam0`. It did **not** contain
+`-feature -HardwareDecoder`. The boot log confirms `androidboot.qemu.hwcodec.avcdec=2`,
+`hevcdec=2`, and `vpxdec=2`: hardware video decoding was enabled for this run.
+
+In contrast, `diagnostics/20261112-152107/emulator.log` explicitly records:
+
+```text
+parseAndApplyOverrides, overrides='-HardwareDecoder'
+Feature 'HardwareDecoder' (73) is overridden to 'disabled'
+```
+
+The successful workaround was per-launch and did not change the default launcher or AVD
+settings. Start this AVD through `./scripts/emulator-debug.sh a34play` for subsequent tests.
+No APK rebuild is needed for this emulator workaround. The recurrence does not establish
+a new app defect: the confirmed failure is again in the host video-decoding stack.

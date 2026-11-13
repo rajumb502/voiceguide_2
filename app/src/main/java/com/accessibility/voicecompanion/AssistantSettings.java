@@ -21,6 +21,16 @@ public final class AssistantSettings {
     public String provider() { return prefs.getString("provider", GEMINI); }
     public String locale() { return prefs.getString("locale", "en-IN"); }
     public String model(String provider) { return prefs.getString(provider + ".model", provider.equals(OPENAI) ? "gpt-4.1-mini" : "gemini-2.5-flash"); }
+    public boolean sharingEnabled() { return prefs.getBoolean("share_page", true); }
+    public boolean screenshotsEnabled() { return prefs.getBoolean("share_screenshots", true); }
+    public boolean rememberPreferences() { return prefs.getBoolean("remember_preferences", true); }
+    public String userPreferences() { return prefs.getString("user_preferences", ""); }
+    public void saveGeneral(boolean share, boolean screenshots, boolean remember, String notes) {
+        if (notes.length()>4000) throw new IllegalArgumentException("Preferences must be at most 4000 characters.");
+        if (!prefs.edit().putBoolean("share_page",share).putBoolean("share_screenshots",screenshots)
+                .putBoolean("remember_preferences",remember).putString("user_preferences",notes.trim()).commit()) throw new IllegalStateException("Could not save preferences.");
+    }
+    public void saveUserPreferences(String notes) { saveGeneral(sharingEnabled(),screenshotsEnabled(),rememberPreferences(),notes); }
     private static synchronized SecretKey encryptionKey() throws Exception {
         KeyStore store = KeyStore.getInstance("AndroidKeyStore"); store.load(null);
         if (store.containsAlias(ALIAS)) return (SecretKey) store.getKey(ALIAS, null);
@@ -41,13 +51,16 @@ public final class AssistantSettings {
     public void save(String provider, String model, String key, String locale) throws Exception {
         if (!provider.equals(GEMINI) && !provider.equals(OPENAI)) throw new IllegalArgumentException("Invalid provider");
         if (!model.matches("[A-Za-z0-9._-]{1,100}")) throw new IllegalArgumentException("Enter a valid model ID.");
-        if (!key.matches("[\\x21-\\x7E]{1,1024}")) throw new IllegalArgumentException("Enter an API key without spaces.");
+        if (!key.isEmpty() && !key.matches("[\\x21-\\x7E]{1,1024}")) throw new IllegalArgumentException("Enter an API key without spaces.");
         if (!locale.matches("[a-zA-Z]{2,3}(-[a-zA-Z]{2,8})*")) throw new IllegalArgumentException("Enter a language tag such as en-IN or hi-IN.");
-        Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding"); cipher.init(Cipher.ENCRYPT_MODE, encryptionKey());
-        cipher.updateAAD(provider.getBytes(StandardCharsets.UTF_8));
-        String encrypted = Base64.encodeToString(cipher.getIV(), Base64.NO_WRAP) + ":" + Base64.encodeToString(cipher.doFinal(key.getBytes(StandardCharsets.UTF_8)), Base64.NO_WRAP);
-        if (!prefs.edit().putString("provider", provider).putString(provider + ".model", model)
-                .putString(provider + ".key", encrypted).putString("locale", locale).commit()) throw new IllegalStateException("Could not save settings.");
+        SharedPreferences.Editor editor = prefs.edit().putString("provider",provider).putString(provider + ".model",model).putString("locale",locale);
+        if (!key.isEmpty()) {
+            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding"); cipher.init(Cipher.ENCRYPT_MODE, encryptionKey());
+            cipher.updateAAD(provider.getBytes(StandardCharsets.UTF_8));
+            String encrypted = Base64.encodeToString(cipher.getIV(), Base64.NO_WRAP) + ":" + Base64.encodeToString(cipher.doFinal(key.getBytes(StandardCharsets.UTF_8)), Base64.NO_WRAP);
+            editor.putString(provider + ".key",encrypted);
+        }
+        if (!editor.commit()) throw new IllegalStateException("Could not save settings.");
     }
     public void removeKey(String provider) { prefs.edit().remove(provider + ".key").apply(); }
 }

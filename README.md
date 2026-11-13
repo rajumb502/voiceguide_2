@@ -18,6 +18,17 @@ The model chooses a next action from the current page; the app validates it, exe
 it, observes the result, and asks the model what to do next. It retains the user's goal,
 clarifications, recent spoken context, and local action outcomes throughout the task.
 
+Conversation memory is separate from task history. Follow-ups retain up to 24 recent
+user/assistant/page messages within a 16,000-character budget, including intermediate
+spoken progress, final descriptions, local readouts, and page references. Each message
+records its page title, site, path, and page ID; URL queries and fragments are omitted.
+A fresh task can therefore refer to an ad or item described during the previous task.
+The model receives the current page separately and must check it before reusing old facts.
+Memory survives briefly switching away from the browser while the activity remains alive;
+leaving the screen still cancels automation. Sharing follows the saved Settings switches. Memory is not
+saved to disk and is lost when the browser activity is recreated or the process exits.
+Say “clear conversation” outside a pending question to erase it explicitly.
+
 Available actions are CLICK, TYPE, SUBMIT, SCROLL, NAVIGATE, BACK, WAIT, ASK and DONE.
 ASK reads a question and listens for the user's reply. DONE speaks the result and ends
 the task. Ordinary links and recognizable search inputs can be used automatically.
@@ -55,14 +66,38 @@ key to replace it, or use Remove saved key. Keys are never sent to page JavaScri
 in URLs, or included in application errors. Backups are disabled. A compromised device
 can still expose credentials. Provider use is billed to the user's API account.
 
-Before the first AI request in a browser session, the app reads a sharing disclosure
-and listens for yes/no. Explicit replies such as “yes, submit” grant sharing consent
-only. Unclear replies repeat the question; explicit no/cancel declines. Nothing is sent
-before yes. Consent lasts until the user leaves the screen. Missed answers get one
-automatic listening retry, and Speak supports a manual retry. Sharing questions expire
-after 60 seconds; consequential-action confirmations expire after 30 seconds.
+Page sharing is configured in Settings. **Allow sending page details and conversation**
+and **Include page screenshots** both default to Yes. There is no repeated sharing
+question. Turn page sharing off to block AI requests and retain local reading/navigation;
+turn screenshots off to send only text and page metadata. These choices persist across
+restarts and apply to both providers. Sensitive-page screenshot suppression still applies.
+Consequential browser actions retain their separate spoken confirmation.
 
-The provider receives the goal, spoken context, action history, visible labels, field
+### Saved feedback preferences
+
+Settings includes **Remember and use my feedback preferences** (default Yes) and an
+editable list of saved preferences. These are app-private local settings, shared across
+providers on this installation, and persist across restarts. Enabled preferences are
+included in future requests; disabling the switch stops saving voice feedback and omits
+the saved profile from requests without deleting the saved notes.
+
+Examples of local voice commands:
+
+- “Remember that I prefer prices before features.”
+- “I prefer vegetarian food.”
+- “From now on, explain unfamiliar terms.”
+- “Keep answers short.” / “Give me more detail.” (replaces the previous detail preference)
+- “Read my preferences.”
+- “Forget my preferences.”
+
+Only direct user feedback in these recognized forms is stored. The model does not infer
+and save a profile from arbitrary page content or every conversation. Settings lets the
+user edit or clear notes; press Save after editing. Feedback memory is limited to 20 notes
+and 4000 characters. The current request takes precedence, and preferences never authorize
+payments, submissions, deletion, or bypassing confirmation. Clearing conversation history
+does not erase saved preferences; use Forget my preferences or Settings to remove those.
+
+The provider receives the goal, enabled saved preferences, spoken context, action history, conversation page references, visible labels, field
 metadata, page title/site name, viewport information, link destinations, and optional
 screenshots. Extracted labels omit form values. Screenshots can contain private text;
 they are omitted when recognized sensitive input fields are present. This detection is

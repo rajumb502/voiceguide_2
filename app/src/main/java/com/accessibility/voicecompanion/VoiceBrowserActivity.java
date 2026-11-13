@@ -25,8 +25,7 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
     private TextView status;
     private EditText address;
     private VoiceEngineManager voice;
-    private final SharingConsent sharing = new SharingConsent();
-    private final JSONArray recentContext = new JSONArray();
+    private final ConversationMemory conversation = new ConversationMemory();
     private final AgentSession agent = new AgentSession();
     private final Handler main = new Handler(Looper.getMainLooper());
     private JSONObject pendingProposal, pendingSnapshot;
@@ -36,7 +35,7 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
     private final ActionSafetyGuard guard = new ActionSafetyGuard();
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private long navigation, requestId;
-    private boolean busy, active, consent, pageFailed;
+    private boolean busy, active, pageFailed;
     private String pageScript;
     private AssistantSettings settings;
     private String locale;
@@ -75,7 +74,7 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
             @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) { return !isWebUrl(request.getUrl().toString()); }
             @Override public void onPageStarted(WebView view, String url, Bitmap icon) {
                 navigation++; pageLoading = true; loadStarted = SystemClock.elapsedRealtime(); pageFailed = false;
-                if (agent.running() && agentActing) { requestId++; busy = false; guard.clear(); sharing.clear(); }
+                if (agent.running() && agentActing) { requestId++; busy = false; guard.clear(); }
                 else cancel();
             }
             @Override public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
@@ -88,6 +87,7 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
                 pageLoading = false;
                 if (!early) view.evaluateJavascript(pageScript, null);
                 address.setText(url);
+                remember("Page loaded: " + (view.getTitle() == null ? Uri.parse(url).getHost() : view.getTitle()));
                 if (active && !pageFailed) {
                     if (agent.running()) scheduleObservation(900);
                     else voice.speak("Loaded " + Uri.parse(url).getHost() + ". Tap Speak and tell me what you want to do, or say help.");
@@ -125,20 +125,10 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
     }
     @Override public void feedback(String text) { status.setText(text); }
     private void cancel() {
-        requestId++; busy = false; agentActing = false; agent.stop(); guard.clear(); sharing.clear(); pendingProposal = pendingSnapshot = null;
+        requestId++; busy = false; agentActing = false; agent.stop(); guard.clear(); pendingProposal = pendingSnapshot = null;
         if (continuation != null) main.removeCallbacks(continuation);
     }
     @Override public void command(String text) {
-        if (sharing.pending()) {
-            SharingConsent.Reply reply = sharing.evaluate(text, navigation, SystemClock.elapsedRealtime());
-            switch (reply.status()) {
-                case ALLOWED: consent = true; command(reply.command()); break;
-                case DECLINED: voice.speak("Sharing cancelled. No page data was sent."); break;
-                case EXPIRED: voice.speak("The sharing question expired or the page changed. No page data was sent. Please repeat your original request."); break;
-                case UNCLEAR: voice.ask("I heard: " + text + ". I could not tell whether you agreed. After the tone, say yes to share this page, or no to cancel. Nothing has been sent.", locale); break;
-            }
-            return;
-        }
         if (guard.hasPending()) {
             var pending = guard.take(text, SystemClock.elapsedRealtime(), navigation);
             if (pending != null && pendingProposal != null) {
@@ -150,21 +140,17 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
             return;
         }
         if (VoiceCommands.normalize(text).matches("stop|cancel|no|नहीं")) { cancel(); voice.speak("Stopped."); return; }
-        if (agent.waiting()) { agent.answer(text); requestAssistant(agent.goal()); return; }
+        if (preferenceCommand(text)) return;
+        if (agent.waiting()) { remember("User: " + text); agent.answer(text); requestAssistant(agent.goal()); return; }
         if (localCommand(text)) return;
         if (busy) { voice.speak("I am still checking. Say stop to cancel."); return; }
-        if (!consent) {
-            sharing.request(text, navigation, SystemClock.elapsedRealtime());
-            voice.ask("To answer, I need to send your command, page labels and an optional screenshot to " + settings.provider()
-                + ". Screenshots may contain private information. Allow sharing until you leave this screen? After the tone, say yes or no. You can also tap Speak to answer.", locale);
-            return;
-        }
+        if (!settings.sharingEnabled()) { voice.speak("AI page sharing is off. You can enable it in Settings, or use local page reading and navigation."); return; }
         if (agent.waiting()) agent.answer(text); else agent.start(text);
         remember("User goal or clarification: " + text);
         requestAssistant(agent.goal());
     }
     private void requestAssistant(String text) {
-        if (!active || !consent || !agent.running()) return;
+        if (!active || !settings.sharingEnabled() || !agent.running()) return;
         if (pageLoading) { scheduleObservation(500); return; }
         if (!agent.nextStep()) { voice.speak("I reached the task's step limit. Tap Speak to give a new instruction."); return; }
         agentActing = false;
@@ -180,8 +166,9 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
                 Object decoded = new JSONTokener(raw).nextValue();
                 if (!(decoded instanceof String)) throw new JSONException("No page snapshot");
                 JSONObject snapshot = new JSONObject((String) decoded);
-                JSONObject payload = new JSONObject().put("command", text).put("snapshot", snapshot).put("recent_context", new JSONArray(recentContext.toString())).put("task_history",new JSONArray(agent.history()));
-                if (!snapshot.getBoolean("sensitive")) {
+                JSONObject payload = new JSONObject().put("command", text).put("snapshot", snapshot).put("conversation_history", conversation.snapshot()).put("current_page",ConversationMemory.page(web.getUrl(),web.getTitle(),navigation)).put("task_history",new JSONArray(agent.history()));
+                if (settings.rememberPreferences()) payload.put("user_preferences",settings.userPreferences());
+                if (settings.screenshotsEnabled() && !snapshot.getBoolean("sensitive")) {
                     int width = web.getWidth(), height = web.getHeight();
                     if (width <= 0 || height <= 0) throw new IllegalStateException("Page has no viewport");
                     float scale = Math.min(1f, 1000f / Math.max(width, height));
@@ -199,11 +186,32 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
             } catch (Exception e) { cancel(); voice.speak("Could not inspect this page. Try reloading it."); }
         });
     }
+    private boolean preferenceCommand(String text) {
+        String normalized = VoiceCommands.normalize(text);
+        if (normalized.matches("forget my preferences|clear my preferences")) {
+            try { settings.saveUserPreferences(""); voice.speak("Saved preferences cleared."); }
+            catch (Exception e) { voice.speak("I could not clear the saved preferences. Please try again in Settings."); }
+            return true;
+        }
+        if (normalized.matches("what do you remember about me|read my preferences|my preferences")) {
+            voice.speak(settings.userPreferences().isEmpty() ? "You have no saved preferences." : "Your saved preferences: " + settings.userPreferences()); return true;
+        }
+        UserPreferences.Update update = UserPreferences.feedback(text);
+        if (update == null) return false;
+        if (!settings.rememberPreferences()) { voice.speak("Remembering preferences is off. You can enable it in Settings."); return true; }
+        try {
+            settings.saveUserPreferences(UserPreferences.merge(settings.userPreferences(),update));
+            voice.speak("I will remember: " + update.text() + ". You can review or change this in Settings.");
+        } catch (Exception e) { voice.speak("I could not save that preference. Please try again in Settings."); }
+        return true;
+    }
     private boolean localCommand(String text) {
         String command = VoiceCommands.normalize(text);
         String url = VoiceCommands.navigationUrl(text);
         if (url != null) { cancel(); voice.speak("Opening " + Uri.parse(url).getHost()); open(url); return true; }
         switch (command) {
+            case "clear conversation": case "forget conversation":
+                cancel(); conversation.clear(); voice.speak("Conversation cleared. I have forgotten previous page descriptions and requests."); return true;
             case "help": case "what can i say": case "what can you do":
                 cancel(); voice.speak(VoiceCommands.HELP); return true;
             case "settings": case "open settings": settings(); return true;
@@ -266,7 +274,7 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
         if (continuation != null) main.removeCallbacks(continuation);
         final long ticket = requestId;
         continuation = () -> {
-            if (!active || ticket != requestId || !agent.running() || !consent || busy) return;
+            if (!active || ticket != requestId || !agent.running() || !settings.sharingEnabled() || busy) return;
             if (pageLoading) {
                 if (SystemClock.elapsedRealtime()-loadStarted > 20000) { cancel(); voice.speak("The page is taking too long. Please try again when it has loaded."); }
                 else scheduleObservation(500);
@@ -283,12 +291,17 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
             if (action.equals("SPEAK") || action.equals("DONE")) { remember("Assistant: " + speech); agent.stop(); voice.speak(speech); return; }
             if (action.equals("ASK")) { agent.ask(); remember("Assistant question: " + speech); voice.ask(speech,locale); return; }
             if (action.equals("NAVIGATE") && !AgentPolicy.navigationAllowed(agent.userInstructions(),response.getString("url"),snapshot)) {
-                agent.ask(); voice.ask("Which website should I open? Please say its address.",locale); return;
+                remember("Assistant: I could not verify that destination from the current page. I will inspect the page again.");
+                voice.speak("I could not verify that destination from the current page. I will inspect the page again.");
+                recordOutcome(response,"Navigation refused: destination is neither user-authorized nor a current-page link. Inspect the existing page and its links. Do not ask which page for a follow-up about something already described.",false);
+                scheduleObservation(600); return;
             }
             if (AgentPolicy.needsConfirmation(response,snapshot)) {
                 pendingProposal = response; pendingSnapshot = snapshot;
                 guard.queue(new ActionSafetyGuard.Pending(response.getString("target_id"),snapshot.getLong("revision"),nav,SystemClock.elapsedRealtime(),response.getString("action_summary")));
-                agent.ask(); voice.ask("I am about to " + response.getString("action_summary") + ". After the tone, say yes to approve or no to cancel.",locale); return;
+                String question = "I am about to " + response.getString("action_summary") + ". After the tone, say yes to approve or no to cancel.";
+                remember("Assistant confirmation: " + question);
+                agent.ask(); voice.ask(question,locale); return;
             }
             executeAgentAction(response,snapshot,nav,false);
         } catch (Exception e) { cancel(); voice.speak("The assistant returned an invalid action. The task stopped."); }
@@ -297,6 +310,7 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
         if (!active || !agent.running() || navigation != nav) { cancel(); voice.speak("The page changed. Please repeat your request."); return; }
         try {
             String kind = action.getString("action");
+            remember("Assistant progress: " + action.getString("spoken_feedback"));
             voice.speak(action.getString("spoken_feedback"));
             busy = true; agentActing = true;
             if (kind.equals("NAVIGATE")) { recordOutcome(action,"Navigation requested; inspect the loaded page.",true); if (!agent.running()) return; web.loadUrl(action.getString("url")); scheduleObservation(1500); return; }
@@ -323,15 +337,15 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
         if (!proceed) { requestId++; agentActing = false; voice.speak("I could not make reliable progress, so I stopped. Tap Speak to change the request or try another approach."); }
     }
     private void remember(String text) {
-        if (recentContext.length() >= 6) recentContext.remove(0);
-        recentContext.put(text.substring(0, Math.min(text.length(), 2000)));
+        String role = text.startsWith("User") ? "user" : text.startsWith("Page loaded:") ? "page" : "assistant";
+        conversation.add(role,text,web == null ? null : web.getUrl(),web == null ? null : web.getTitle(),navigation);
     }
     private void settings() {
         cancel(); voice.stop();
         startActivity(new Intent(this, SettingsActivity.class));
     }
     @Override protected void onResume() { super.onResume(); active = true; locale = settings.locale(); }
-    @Override protected void onPause() { active = false; consent = false;
-        while (recentContext.length() > 0) recentContext.remove(0); cancel(); if (voice != null) voice.stop(); super.onPause(); }
+    @Override protected void onPause() { active = false;
+        cancel(); if (voice != null) voice.stop(); super.onPause(); }
     @Override protected void onDestroy() { voice.destroy(); web.destroy(); worker.shutdownNow(); super.onDestroy(); }
 }
