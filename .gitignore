@@ -1,0 +1,9 @@
+.gradle/
+**/build/
+local.properties
+.env
+__pycache__/
+*.pyc
+.codex-log/
+
+diagnostics/
