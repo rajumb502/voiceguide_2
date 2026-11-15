@@ -65,17 +65,28 @@
 
 ---
 
-## 4. Automated Testing Strategy
+## 4. Security, Privacy & Hardware Confirmation Guardrails
+- **Encrypted Storage:** Both API credentials (`AssistantSettings.java`) and user profile preferences (`UserPreferences.java`) use `EncryptedSharedPreferences` backed by the Android Keystore System.
+- **Persistent Conversation Memory (`ConversationMemory.java` & `AgentSession.java`):** Stores bounded cross-session context (saved consumer IDs, preferred language) locally while tracking current-page steps in memory to prevent infinite action loops.
+- **Mandatory Hardware Confirmation (`ActionSafetyGuard.java` & `VoiceBrowserActivity.java`):** High-stakes actions (`pay`, `submit`, `confirm`, `transfer`, `delete`, `proceed`, `checkout`, `otp`) **never execute via spoken `"Yes"`/`"Haan"`**. They require a **physical Volume Up double-press** (within `1,200ms`) and expire automatically after **30 seconds**. Pressing Volume Down or saying `"Cancel"`/`"Ruko"` aborts immediately.
+- **Audio Focus Lock (`VoiceEngineManager.java`):** Requests `AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE` before opening `SpeechRecognizer` so background TV, YouTube, or speaker audio cannot inject commands.
+- **Audio-First Permission Onboarding (`SettingsActivity.java`):** Guides visually impaired users step-by-step via TTS to grant `RECORD_AUDIO`, Accessibility Service, and Default Home Launcher permissions.
 
-### Layer 1: JVM Unit Tests (`app/src/test/java/com/accessibility/voicecompanion/`)
-Using **JUnit 4 + Mockito + Robolectric** (`./gradlew testDebugUnitTest`):
-* `ActionSafetyGuardTest`: High-risk keyword detection, `"Yes"`/`"Haan"` execution, `"No"` cancellation, and automatic expiration after `30,001ms`.
-* `SharingConsentTest`: Unknown domain blocking and sensitive input (`password`/OTP) redaction.
-* `AssistantClientFailoverTest`: OkHttp `MockWebServer` verification of multimodal-to-text-only failover on timeout/503.
+---
 
-### Layer 2: Instrumented Closed Shadow DOM & Iframe Tests (`app/src/androidTest/`)
-Using **Espresso Web + MockWebServer** (`./gradlew connectedAndroidTest`):
-* `ShadowDomUnpackerTest`: Serves hostile local HTML with `attachShadow({ mode: 'closed' })` and `<input type="password">`, verifying closed-root extraction, `"[REDACTED]"` masking, and DOM click execution.
+## 5. Automated Testing Strategy
+To keep CI/CD deterministic, fast, and free of live microphone dependencies or Gemini API quota burn, automated tests are split across three layers:
+
+### Layer 1: Fast JVM Unit Tests (`app/src/test/java/com/accessibility/voicecompanion/`)
+Uses **JUnit 4 + Mockito + Robolectric** (`./gradlew testDebugUnitTest`):
+- **`ActionSafetyGuardTest`:** Verifies high-risk keyword detection, rejection of spoken `"Yes"`/`"Haan"`, execution on two Volume Up presses within `1,200ms`, Volume Down cancellation, and automatic expiration after `30,001ms` via `ShadowSystemClock`.
+- **`SharingConsentTest`:** Verifies unknown domains block cloud uploads until approved and sensitive input masking strips password/OTP values.
+- **`AssistantClientFailoverTest`:** Uses OkHttp `MockWebServer` to verify automatic fallback from multimodal payload to text-only DOM payload on HTTP 503 or socket timeout.
+
+### Layer 2: Instrumented WebView & Closed Shadow DOM Tests (`app/src/androidTest/`)
+Uses **Espresso Web + MockWebServer** (`./gradlew connectedAndroidTest`):
+- **`ShadowDomUnpackerTest`:** Serves a local hostile HTML page containing `element.attachShadow({ mode: 'closed' })` and `<input type="password">`. Asserts that `VoiceBrowserActivity` pierces the closed shadow root, redacts password values to `"[REDACTED]"`, and triggers DOM clicks accurately.
 
 ### Layer 3: End-to-End Voice Flow Verification
-* Expose package-private `simulateVoiceInput(String spokenText)` on `VoiceBrowserActivity` to bypass physical microphone hardware in CI and test full conversational confirmation flows against `MockWebServer`.
+- Exposes a package-private test hook `simulateVoiceInput(String spokenText)` on `VoiceBrowserActivity` to bypass physical hardware microphone capture in CI and feed commands straight into `VoiceCommandCallback.onCommandRecognized()`.
+- Verifies multi-step conversational flows (e.g., `"Pay bill"` → TTS hardware prompt → simulated double `KEYCODE_VOLUME_UP` → DOM click execution) against canned `MockWebServer` Gemini JSON responses.

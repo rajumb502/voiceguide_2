@@ -5,45 +5,43 @@
 
 ---
 
-## Phase 1: Safety, Privacy & Core Guardrails (P0 — Must Have Before Any Real User Testing)
-*Goal: Ensure user passwords, OTPs, and money are completely protected before putting the app on a blind user's phone.*
+## Phase 1: Safety, Privacy & Hardware Confirmation (P0 — Must Have First)
+*Goal: Protect user credentials, OTPs, and money against bystander spoofing and accidental taps.*
 
 - [ ] **Task 1.1: Gradle Dependencies (`app/build.gradle`)**
-  - Add `androidx.security:security-crypto` (for encrypted user preferences).
-  - Add `androidx.webkit:webkit` (for reliable document-start script injection).
-  - Add JUnit 4, Robolectric, Mockito, and OkHttp `MockWebServer` test dependencies.
+  - Add `androidx.webkit:webkit` (for reliable document-start script injection across frames).
+  - Add JUnit 4, Robolectric, Mockito, and OkHttp `MockWebServer` test dependencies. *(Do NOT add deprecated `androidx.security:security-crypto`.)*
 - [ ] **Task 1.2: Sensitive Field Masking & Hostname Extraction (`VoiceBrowserActivity.java`)**
-  - Update the injected JS DOM scraper to mask `input[type="password"]`, `input[type="hidden"]`, and OTP/card fields as `"[REDACTED]"`.
-  - Pass `window.location.hostname` to `AndroidVoiceBridge`.
-- [x] **Task 1.3: Per-Domain Consent Gate (`SharingConsent.java` & `AssistantClient.java`)**
+  - Update the injected JS DOM scraper to mask `input[type="password"]`, `input[type="hidden"]`, and OTP/card fields as `"[REDACTED]"`, and pass `window.location.hostname` to `AndroidVoiceBridge`.
+- [ ] **Task 1.3: Per-Domain Consent Gate (`SharingConsent.java` & `AssistantClient.java`)**
   - Block Gemini uploads for unapproved domains and prompt the user via TTS (*"Allow sharing screen details on [hostname]? Say Yes or No"*).
-  - Spoken approval is now saved per exact hostname and provider in encrypted settings. Settings can edit/clear approvals or enable an all-sites override for that provider (default off). The master sharing switch, sensitive-field protections, and action confirmations still apply.
-- [x] **Task 1.4: 30-Second Confirmation Timeout (`ActionSafetyGuard.java`)**
-  - Track `queuedTimestampMs` when holding high-risk actions (`pay`, `submit`, `transfer`, `delete`) and auto-expire after `30,000ms` with a spoken timeout alert.
-- [ ] **Task 1.5: Encrypt Saved User Preferences (`UserPreferences.java`)**
-  - Migrate plaintext `SharedPreferences` (saved consumer IDs, URLs) to `EncryptedSharedPreferences` and delete old plaintext files.
-- [x] **Task 1.6: Phase 1 Verification Tests**
-  - Write and run `ActionSafetyGuardTest` and `SharingConsentTest` via `./gradlew testDebugUnitTest`.
-  - Existing `SafetyGuardTest` and `SharingConsentTest` run through JUnit `HostChecksTest`; Android `StorageTest` covers encrypted consent persistence, provider isolation, revocation, overrides, and the HTTP gate.
-
-**Phase 1 review:** The APK build, lint, 16 JVM tests, eight Android 14 emulator tests, and both JavaScript suites pass. Phase 1 remains open: Task 1.1 has the runtime dependencies and JUnit, but the proposed Robolectric/Mockito/MockWebServer stack is not installed or used. Task 1.2 already suppresses sensitive nodes entirely and returns hostname through the existing snapshot callback; it does not emit literal `[REDACTED]` nodes or introduce `AndroidVoiceBridge`. Task 1.5 already encrypts and migrates profile notes in `AssistantSettings`, where they are actually stored; successful migration clears the old preferences but leaves an empty legacy XML file. Those differences remain explicit rather than marking the exact roadmap tasks complete. This update stays within Phase 1; later phases were reviewed but no additional later-phase work was started.
+- [ ] **Task 1.4: Mandatory Hardware Volume Confirmation & 30s Timeout (`ActionSafetyGuard.java` & `VoiceBrowserActivity.java`)**
+  - Enforce **physical Volume Up double-press** (within `1,200ms`) as the sole confirmation trigger for all high-stakes transactions (`pay`, `submit`, `confirm`, `transfer`, `delete`, `proceed`, `checkout`, `otp`).
+  - Explicitly reject spoken `"Yes"`/`"Haan"` confirmations while a sensitive action is pending; allow Volume Down or spoken `"Cancel"`/`"Ruko"` to abort immediately.
+  - Auto-expire pending actions after `30,000ms` with a spoken timeout alert.
+  - Request `AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE` when `SpeechRecognizer` opens so background media/TV audio pauses automatically.
+- [ ] **Task 1.5: Encrypt Saved User Preferences (`UserPreferences.java` & `KeystoreCryptoHelper.java`)**
+  - Reuse the existing **Android Keystore (`AES/GCM/NoPadding`)** encryption pattern from `AssistantSettings.java` (or extract a shared `KeystoreCryptoHelper`) to encrypt saved consumer IDs, URLs, and profile snippets inside standard `SharedPreferences`, migrating and wiping any old plaintext values.
+- [ ] **Task 1.6: Phase 1 Verification Tests (`ActionSafetyGuardTest.java` & `SharingConsentTest.java`)**
+  - Assert spoken `"Yes"`/`"Haan"` does **not** execute a pending payment.
+  - Assert two `KEYCODE_VOLUME_UP` presses within `1,200ms` execute the action, while presses > 30s apart expire safely.
 
 ---
 
-## Phase 2: Blind-First UX & Reliability (P1 — Makes the App Usable Without Sight)
-*Goal: Eliminate silent waiting screens, support low-network Indian conditions, and simplify first-time setup.*
+## Phase 2: Blind-First UX & Reliability (P1 — Eliminate Silent Screens & Network Drops)
+*Goal: Give immediate spoken orientation, tactile audio feedback, and offline/low-bandwidth resilience.*
 
 - [ ] **Task 2.1: Audio Earcons & Tap-to-Interrupt Barge-In (`VoiceEngineManager.java`)**
-  - Add `ToneGenerator` / `SoundPool` audio cues (thinking pulse, click chime, error tone).
-  - Map single-finger screen tap or Volume Up press to immediately stop TTS and start `SpeechRecognizer`.
+  - Add `ToneGenerator` / `SoundPool` cues (soft pulse while Gemini thinks, crisp chime on action success, low tone on error/timeout).
+  - Map single-finger screen tap or single Volume Up press (when no confirmation is pending) to immediately stop TTS and start `SpeechRecognizer`.
 - [ ] **Task 2.2: Auto "Audio Landmark Brief" (`VoiceBrowserActivity.java`)**
-  - On `onPageFinished`, speak a concise 2-sentence summary of the page title, inputs, and main buttons so the user is never left on a silent screen.
+  - On `onPageFinished`, speak a concise 2-sentence summary of the page title, input fields, and main buttons so the user never lands on a silent screen.
 - [ ] **Task 2.3: Text-Only & Offline Failover (`AssistantClient.java` & `VoiceCommands.java`)**
-  - Add automatic fallback from multimodal (image + DOM) to text-only DOM when network times out or returns 429/5xx, plus offline local commands (`scroll down`, `go back`, `read page`).
+  - Fall back automatically from multimodal (image + DOM) to text-only DOM on network timeout or HTTP 429/5xx, and route basic commands (`scroll down`, `go back`, `read page`) to local `VoiceCommands` offline.
 - [ ] **Task 2.4: Audio-First Permission Onboarding (`SettingsActivity.java`)**
-  - Build a spoken step-by-step setup wizard guiding users through `RECORD_AUDIO`, Accessibility Service, and Default Home Launcher (`ROLE_HOME`) settings.
+  - Build a voice-guided setup wizard for `RECORD_AUDIO`, Accessibility Service, and Default Home Launcher (`ROLE_HOME`).
 - [ ] **Task 2.5: Phase 2 Verification Tests**
-  - Write and run `AssistantClientFailoverTest` (using `MockWebServer`) and `ShadowDomUnpackerTest` (instrumented test verifying closed Shadow DOM piercing + password redaction).
+  - Run `AssistantClientFailoverTest` (`MockWebServer`) and `ShadowDomUnpackerTest` (instrumented test verifying closed Shadow DOM piercing + password redaction + Volume Up double-press confirmation).
 
 ---
 
@@ -54,7 +52,7 @@
   - Switch script injection to `WebViewCompat.addDocumentStartJavaScript`.
   - Add DPI-scaled `MotionEvent` coordinate tap fallback when cross-origin `<iframe>` gateways (Razorpay, BillDesk, Aadhaar e-KYC) block `element.click()`.
 - [ ] **Task 3.2: Hands-Free SMS OTP Auto-Read (`SmsOtpHelper.java`)**
-  - Integrate Android's **SMS User Consent API** (zero `READ_SMS` permission needed) to detect incoming OTPs, read them aloud, and fill them upon verbal `"Yes"`.
+  - Integrate Android's **SMS User Consent API** (zero `READ_SMS` permission needed) to detect incoming OTPs, read them aloud, and fill/submit upon **physical Volume Up double-press** (preventing bystander OTP spoofing).
 - [ ] **Task 3.3: Regional Languages & Code-Mixed Voice (`VoiceEngineManager.java` & `UserPreferences.java`)**
   - Add language selection (`en-IN`, `hi-IN`, `kn-IN`, `ta-IN`, `mr-IN`) in `SettingsActivity` and pass locale context to both `SpeechRecognizer` and Gemini prompts.
 
@@ -64,6 +62,6 @@
 *Goal: Reduce repeat typing and cut Gemini API token costs for recurring tasks.*
 
 - [ ] **Task 4.1: Persistent 4-Tier Memory (`ConversationMemory.java` & `AgentSession.java`)**
-  - Keep per-page step history in `AgentSession` to prevent action loops, and persist the last 20 conversation turns + saved biller IDs locally.
+  - Keep per-page step history in `AgentSession` to prevent action loops, and persist the last 20 conversation turns + saved biller IDs encrypted via `KeystoreCryptoHelper` (injected only when `SharingConsent` allows).
 - [ ] **Task 4.2: "Teach Once, Replay Forever" Local Macros (`MacroStore.java`)**
   - Allow saving successful multi-step workflows (e.g., *"Check BESCOM Bill"*) and replaying them locally via DOM clicks, invoking Gemini only if a selector breaks.
