@@ -8,6 +8,7 @@ import android.media.AudioManager;
 import android.media.ToneGenerator;
 import android.os.Handler;
 import android.os.Looper;
+import android.util.Log;
 import android.speech.*;
 import android.speech.tts.TextToSpeech;
 import android.speech.tts.UtteranceProgressListener;
@@ -17,10 +18,11 @@ import java.util.Locale;
 public final class VoiceEngineManager implements RecognitionListener {
     public interface Callback { void command(String text); void feedback(String text); }
     private final Callback callback;
+    private final Context context;
     private SpeechRecognizer recognizer;
     private TextToSpeech tts;
     private final Handler main = new Handler(Looper.getMainLooper());
-    private boolean ready, destroyed;
+    private boolean ready, destroyed, onDevice;
     private String queued;
     private Runnable afterSpeech;
     private long utterance;
@@ -29,13 +31,14 @@ public final class VoiceEngineManager implements RecognitionListener {
     private String answerLocale;
     public VoiceEngineManager(Context context, Callback callback) {
         this.callback = callback;
-        Context app = context.getApplicationContext();
-        if (Looper.myLooper() == Looper.getMainLooper()) initialize(app); else main.post(() -> initialize(app));
+        this.context = context.getApplicationContext();
+        if (Looper.myLooper() == Looper.getMainLooper()) initialize(this.context); else main.post(() -> initialize(this.context));
     }
     private void initialize(Context context) {
         if (destroyed) return;
         try {
-            if (Build.VERSION.SDK_INT >= 31 && SpeechRecognizer.isOnDeviceRecognitionAvailable(context)) recognizer = SpeechRecognizer.createOnDeviceSpeechRecognizer(context);
+            onDevice = Build.VERSION.SDK_INT >= 31 && SpeechRecognizer.isOnDeviceRecognitionAvailable(context);
+            if (Build.VERSION.SDK_INT >= 31 && onDevice) recognizer = SpeechRecognizer.createOnDeviceSpeechRecognizer(context);
             else if (SpeechRecognizer.isRecognitionAvailable(context)) recognizer = SpeechRecognizer.createSpeechRecognizer(context);
         } catch (RuntimeException e) { callback.feedback("Speech recognition is unavailable on this device."); }
         if (recognizer != null) recognizer.setRecognitionListener(this);
@@ -67,7 +70,7 @@ public final class VoiceEngineManager implements RecognitionListener {
         Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
         intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
         intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, locale);
-        intent.putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE,true);
+        if (onDevice) intent.putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE,true);
         setLanguage(locale);
         listening = false; recognizer.cancel();
         long attempt = utterance;
@@ -132,6 +135,18 @@ public final class VoiceEngineManager implements RecognitionListener {
     @Override public void onError(int error) {
         if (destroyed || !listening || error == SpeechRecognizer.ERROR_CLIENT) return;
         listening = false;
+        Log.w("VoiceEngineManager","Speech recognition error " + error + ", on-device: " + onDevice);
+        if (onDevice && (error == SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED || error == SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE)) {
+            onDevice = false;
+            recognizer.destroy(); recognizer = null;
+            try {
+                if (SpeechRecognizer.isRecognitionAvailable(context)) {
+                    recognizer = SpeechRecognizer.createSpeechRecognizer(context); recognizer.setRecognitionListener(this);
+                    listen(answerLocale); return;
+                }
+            } catch (RuntimeException e) { Log.w("VoiceEngineManager","Could not start system speech recognition."); }
+            speak("Offline speech is unavailable for this language, and system speech recognition could not start. Check Android speech recognition settings."); return;
+        }
         if (error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT) {
             retryQuestionOrSpeak(answeringQuestion ? "I did not hear clearly. Tap Speak, wait for the tone, then say your answer. The question is still pending until it expires." : "I did not hear clearly. Tap Speak, wait for the tone, then say your command."); return;
         }
@@ -140,7 +155,10 @@ public final class VoiceEngineManager implements RecognitionListener {
             case SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS: message = "Microphone access is missing. Tap Speak to grant permission."; break;
             case SpeechRecognizer.ERROR_NETWORK: case SpeechRecognizer.ERROR_NETWORK_TIMEOUT: message = "Speech recognition could not connect. Check your connection and tap Speak to try again."; break;
             case SpeechRecognizer.ERROR_RECOGNIZER_BUSY: message = "The microphone is busy. Wait a moment, then tap Speak again."; break;
-            default: message = "I did not hear clearly. Tap Speak, wait for the tone, then say your command.";
+            case SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED: case SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE:
+                message = "Speech recognition is unavailable for " + answerLocale + ". Download its speech language pack in Android settings, or choose another speech language in the app's Settings."; break;
+            case SpeechRecognizer.ERROR_AUDIO: message = "The microphone could not capture audio. Check your microphone and audio input settings, then tap Speak again."; break;
+            default: message = "The speech recognition service could not complete the request. Check Android speech recognition settings, then tap Speak again.";
         }
         speak(message);
     }

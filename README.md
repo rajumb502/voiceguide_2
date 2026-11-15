@@ -126,8 +126,9 @@ screenshots. Extracted labels omit form values and recognized password/OTP/card 
 Screenshots are bounded to 720 pixels on either edge, encoded at JPEG quality 70 on a
 worker thread, and omitted for recognized sensitive fields, editable content, or iframes. This detection is
 incomplete. Passwords, OTP, file inputs and recognized card fields cannot be typed by
-the executor. Speech uses on-device recognition when available (Android 12+) and otherwise
-requests offline recognition; a recognizer may still require a network connection.
+the executor. Speech tries on-device recognition when available (Android 12+). If its
+language is unsupported or not downloaded, it falls back once to the system recognizer
+without forcing offline mode; that recognizer may require a network connection.
 Installed offline TTS voices are preferred for the selected language.
 
 Gemini defaults to gemini-2.5-flash-lite; existing model choices remain saved. A transient
@@ -145,6 +146,8 @@ Use JDK 17 and Android SDK 35. Open the project in Android Studio, or run:
 ./gradlew :app:testDebugUnitTest
 ./gradlew :app:connectedDebugAndroidTest
 ```
+
+Instrumented tests leave the app installed to preserve emulator settings and keys.
 
 Run on Android 8.0+ with speech recognition and TTS installed. No backend URL or server
 token is needed. backend/server.py remains an unused reference from the first prototype.
