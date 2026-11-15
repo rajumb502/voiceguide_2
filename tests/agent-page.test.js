@@ -29,6 +29,10 @@ for (const site of ['library.example','news.example']) {
   assert.equal(api.perform({action:'SUBMIT',target_id:id},snapshot.revision,false),true); assert.equal(submitted,1);
   overlay=true; assert.equal(api.perform({action:'TYPE',target_id:id,text:'other'},snapshot.revision,false),false); overlay=false;
   input.attributes.autocomplete='one-time-code'; snapshot=JSON.parse(api.snapshot()); assert.equal(snapshot.sensitive,true);
+  assert.equal(snapshot.nodes.length,0);
   assert.equal(api.perform({action:'TYPE',target_id:id,text:'123456'},snapshot.revision,false),false);
+  input.attributes.autocomplete=''; input.attributes.type='password'; input.value='do-not-upload';
+  snapshot=JSON.parse(api.snapshot()); assert.equal(snapshot.sensitive,true); assert.equal(snapshot.nodes.length,0);
+  assert.equal(JSON.stringify(snapshot).includes('do-not-upload'),false);
 }
 console.log('Generic typing, form submission, redaction and blocked-field tests passed for two site fixtures');

@@ -3,6 +3,8 @@ package com.accessibility.voicecompanion;
 import org.json.*;
 import org.junit.Test;
 import static org.junit.Assert.*;
+import java.net.SocketTimeoutException;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class AssistantClientTest {
     private JSONObject payload() throws Exception {
@@ -51,5 +53,39 @@ public class AssistantClientTest {
             .put("content",new JSONObject().put("parts",new JSONArray().put(new JSONObject().put("thought",true).put("text","private reasoning"))
             .put(new JSONObject().put("text",action().toString()))))));
         assertEquals("CLICK",AssistantClient.parse(AssistantSettings.GEMINI,response).getString("action"));
+    }
+    @Test public void sensitiveMetadataIsRedactedEvenWhenPageFlagIsWrong() throws Exception {
+        for (String metadata : new String[]{"password","one-time-code","otp","cc-number"}) {
+            JSONObject payload = payload();
+            payload.getJSONObject("snapshot").getJSONArray("nodes").getJSONObject(0).put("autocomplete",metadata).put("label","private-field-123456");
+            for (String provider : new String[]{AssistantSettings.GEMINI,AssistantSettings.OPENAI}) {
+                String body = AssistantClient.body(provider,"model",payload).toString();
+                assertFalse(body.contains("private-field-123456")); assertFalse(body.contains("jpeg-data"));
+            }
+        }
+    }
+    @Test public void imageTimeoutRetriesOnceWithoutImageAndPreservesOriginal() throws Exception {
+        for (String provider : new String[]{AssistantSettings.GEMINI,AssistantSettings.OPENAI}) {
+            JSONObject original = payload(); AtomicInteger calls = new AtomicInteger();
+            JSONObject result = AssistantClient.withFallback(provider,"model","key",original,(p,m,k,data) -> {
+                assertEquals(provider,p); assertEquals("key",k);
+                if (calls.incrementAndGet() == 1) { assertTrue(data.has("image")); throw new SocketTimeoutException(); }
+                assertFalse(data.has("image")); assertTrue(data.has("snapshot"));
+                assertEquals(provider.equals(AssistantSettings.GEMINI) ? "gemini-2.5-flash-lite" : "model",m);
+                return action();
+            });
+            assertEquals("CLICK",result.getString("action")); assertEquals(2,calls.get()); assertTrue(original.has("image"));
+        }
+    }
+    @Test public void quotaRetriesButInvalidCredentialsDoNotAndOfflineStopsAfterTwoAttempts() throws Exception {
+        for (boolean retryable : new boolean[]{false,true}) {
+            AtomicInteger calls = new AtomicInteger();
+            try {
+                AssistantClient.withFallback(AssistantSettings.GEMINI,"model","key",payload(),(p,m,k,data) -> {
+                    calls.incrementAndGet(); throw new AssistantClient.RequestFailure("Unavailable",retryable);
+                });
+                fail("Expected request failure");
+            } catch (AssistantClient.RequestFailure expected) { assertEquals(retryable ? 2 : 1,calls.get()); }
+        }
     }
 }

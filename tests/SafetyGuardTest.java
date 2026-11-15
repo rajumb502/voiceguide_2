@@ -16,7 +16,11 @@ public class SafetyGuardTest {
         check(guard.take("हाँ", 200, 2) != null);
         check(guard.take("yes", 200, 2) == null);
         guard.queue(new ActionSafetyGuard.Pending("1", 1, 2, 100, "pay"));
-        check(guard.take("yes", 30101, 2) == null);
+        check(guard.take("yes", 30100, 2) == null);
+        guard.queue(new ActionSafetyGuard.Pending("1", 1, 2, 100, "pay"));
+        check(guard.take("yes", 30099, 2) != null);
+        guard.queue(new ActionSafetyGuard.Pending("1", 1, 2, 100, "pay"));
+        check(guard.take("yes", 99, 2) == null);
         guard.queue(new ActionSafetyGuard.Pending("1", 1, 2, 100, "pay"));
         check(guard.take("yes", 200, 3) == null);
         System.out.println("SafetyGuardTest passed");

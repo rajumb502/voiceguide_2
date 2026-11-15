@@ -12,9 +12,16 @@
     new MutationObserver(() => revision++).observe(root, {subtree:true, childList:true, attributes:true, characterData:true});
   }
   const ids = new WeakMap(); let nextId = 0; let targets = new Map();
+  function publicText(el) {
+    let text = el.innerText || '';
+    for (const field of el.querySelectorAll?.('textarea,select,[contenteditable]') || []) {
+      for (const value of [field.innerText, field.textContent]) if (value) text = text.split(value).join('');
+    }
+    return text;
+  }
   function label(el) {
-    const text = el.matches('input,textarea,select') ? '' : el.innerText;
-    const associated = Array.from(el.labels || []).map(l => l.innerText).join(' ');
+    const text = el.matches('input,textarea,select') ? '' : publicText(el);
+    const associated = Array.from(el.labels || []).map(publicText).join(' ');
     const imageAlt = el.querySelector?.('img[alt]')?.getAttribute('alt');
     return (el.getAttribute('aria-label') || associated || text || imageAlt || el.getAttribute('placeholder') || el.getAttribute('title') || '').trim().slice(0,200);
   }
@@ -51,7 +58,7 @@
   function sensitiveField(el) {
     return /password|hidden|file/i.test(el.getAttribute('type') || '') ||
       /one-time-code|cc-|current-password|new-password/i.test(el.getAttribute('autocomplete') || '') ||
-      /password|otp|card number|cvv|pin code/i.test(label(el));
+      /password|one.time|otp|card.?number|cvv|\bpin\b/i.test([label(el),el.getAttribute('name'),el.getAttribute('id')].join(' '));
   }
   function visible(el) {
     const r = el.getBoundingClientRect(), s = getComputedStyle(el);
@@ -62,12 +69,14 @@
     function walk(root) {
       observe(root);
       for (const el of root.querySelectorAll('*')) {
+        if (el.tagName === 'IFRAME' || el.isContentEditable) sensitive = true;
         if (el.matches('input,textarea,select') && sensitiveField(el)) sensitive = true;
         if (el.shadowRoot) walk(el.shadowRoot);
         if (!visible(el) || !el.matches('a,button,input,select,textarea,[role=button],[role=link],h1,h2,h3,p,label')) continue;
         if (!ids.has(el)) ids.set(el, String(++nextId));
         const id = ids.get(el), r = el.getBoundingClientRect();
         const privateField = el.matches('input,textarea,select');
+        if ((privateField && sensitiveField(el)) || el.isContentEditable) continue;
         const node = {id, label: label(el), tag:el.tagName, role:el.getAttribute('role') || '', type:el.getAttribute('type') || '', name:el.getAttribute('name') || '', placeholder:el.getAttribute('placeholder') || '', autocomplete:el.getAttribute('autocomplete') || '', href:el.tagName === 'A' ? el.href || '' : '', download:el.hasAttribute ? el.hasAttribute('download') : false, clickable:el.matches('a,button,[role=button],[role=link]'), search:isSearch(el), search_form:searchForm(el), sensitive:privateField && sensitiveField(el), filled:privateField && !!el.value, disabled:!!el.disabled || el.getAttribute('aria-disabled') === 'true', editable:privateField,
           x:r.x, y:r.y, width:r.width, height:r.height};
         nodes.push(node); targets.set(id, {el, signature:signature(el), revision, value:privateField ? el.value : undefined});

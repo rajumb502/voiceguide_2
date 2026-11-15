@@ -14,6 +14,7 @@ public final class AgentPolicy {
     public static boolean needsConfirmation(JSONObject action, JSONObject snapshot) throws JSONException {
         String kind = action.getString("action");
         JSONObject node = target(action,snapshot);
+        if (node != null && AssistantClient.sensitive(node)) return true;
         String label = action.getString("action_summary") + " " + (node == null ? "" : node.getString("label") + " " + node.optString("href"));
         if (new ActionSafetyGuard().requiresConfirmation(action.getBoolean("requires_confirmation"),label)) return true;
         if (kind.equals("TYPE")) return node == null || !node.optBoolean("search");

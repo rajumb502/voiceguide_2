@@ -3,6 +3,7 @@ package com.accessibility.voicecompanion;
 import android.content.Context;
 import android.content.Intent;
 import android.os.Bundle;
+import android.os.Build;
 import android.media.AudioManager;
 import android.media.ToneGenerator;
 import android.os.Handler;
@@ -16,7 +17,7 @@ import java.util.Locale;
 public final class VoiceEngineManager implements RecognitionListener {
     public interface Callback { void command(String text); void feedback(String text); }
     private final Callback callback;
-    private final SpeechRecognizer recognizer;
+    private SpeechRecognizer recognizer;
     private TextToSpeech tts;
     private final Handler main = new Handler(Looper.getMainLooper());
     private boolean ready, destroyed;
@@ -28,13 +29,21 @@ public final class VoiceEngineManager implements RecognitionListener {
     private String answerLocale;
     public VoiceEngineManager(Context context, Callback callback) {
         this.callback = callback;
-        recognizer = SpeechRecognizer.isRecognitionAvailable(context) ? SpeechRecognizer.createSpeechRecognizer(context) : null;
+        Context app = context.getApplicationContext();
+        if (Looper.myLooper() == Looper.getMainLooper()) initialize(app); else main.post(() -> initialize(app));
+    }
+    private void initialize(Context context) {
+        if (destroyed) return;
+        try {
+            if (Build.VERSION.SDK_INT >= 31 && SpeechRecognizer.isOnDeviceRecognitionAvailable(context)) recognizer = SpeechRecognizer.createOnDeviceSpeechRecognizer(context);
+            else if (SpeechRecognizer.isRecognitionAvailable(context)) recognizer = SpeechRecognizer.createSpeechRecognizer(context);
+        } catch (RuntimeException e) { callback.feedback("Speech recognition is unavailable on this device."); }
         if (recognizer != null) recognizer.setRecognitionListener(this);
         tts = new TextToSpeech(context, status -> main.post(() -> {
             if (destroyed) return;
             ready = status == TextToSpeech.SUCCESS;
             if (ready) {
-                tts.setLanguage(Locale.forLanguageTag("en-IN"));
+                setLanguage(answerLocale == null ? "en-IN" : answerLocale);
                 if (queued != null) { String message = queued; queued = null; say(message); }
             } else callback.feedback("Speech output is unavailable. Check Android text-to-speech settings.");
         }));
@@ -50,25 +59,39 @@ public final class VoiceEngineManager implements RecognitionListener {
         });
     }
     public void listen(String locale) {
+        if (Looper.myLooper() != Looper.getMainLooper()) { main.post(() -> listen(locale)); return; }
+        if (destroyed) return;
         afterSpeech = null; queued = null; utterance++;
         if (recognizer == null) { callback.feedback("Speech recognition is unavailable on this device."); return; }
         tts.stop();
         Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
         intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
         intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, locale);
+        intent.putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE,true);
+        setLanguage(locale);
         listening = false; recognizer.cancel();
         long attempt = utterance;
         callback.feedback("Starting microphone…");
         main.postDelayed(() -> {
             if (destroyed || attempt != utterance) return;
-            listening = true; recognizer.startListening(intent);
+            try { listening = true; recognizer.startListening(intent); }
+            catch (RuntimeException e) { listening = false; speak("Could not start the microphone. Check microphone permission and speech recognition settings."); }
         }, 150);
     }
-    public void speak(String text) { answeringQuestion = false; afterSpeech = null; say(text); }
+    public void speak(String text) {
+        if (Looper.myLooper() != Looper.getMainLooper()) { main.post(() -> speak(text)); return; }
+        answeringQuestion = false; afterSpeech = null; say(text);
+    }
     public void ask(String text, String locale) {
+        if (Looper.myLooper() != Looper.getMainLooper()) { main.post(() -> ask(text,locale)); return; }
+        setLanguage(locale);
         answeringQuestion = true; automaticRetries = 1; answerLocale = locale;
         afterSpeech = () -> listen(locale);
         say(text);
+    }
+    public void guide(String text, Runnable next) {
+        if (Looper.myLooper() != Looper.getMainLooper()) { main.post(() -> guide(text,next)); return; }
+        answeringQuestion = false; afterSpeech = next; say(text);
     }
     private void say(String text) {
         if (destroyed) return;
@@ -77,8 +100,28 @@ public final class VoiceEngineManager implements RecognitionListener {
         callback.feedback(text);
         if (ready) tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, Long.toString(utterance)); else queued = text;
     }
-    public void stop() { answeringQuestion = false; listening = false; afterSpeech = null; utterance++; queued = null; if (recognizer != null) recognizer.cancel(); tts.stop(); }
-    public void destroy() { destroyed = true; if (recognizer != null) recognizer.destroy(); tts.shutdown(); }
+    public void setLanguage(String locale) {
+        if (Looper.myLooper() != Looper.getMainLooper()) { main.post(() -> setLanguage(locale)); return; }
+        answerLocale = locale;
+        if (ready && !destroyed) {
+            Locale language = Locale.forLanguageTag(locale); tts.setLanguage(language);
+            if (tts.getVoices() != null) for (android.speech.tts.Voice voice : tts.getVoices()) {
+                if (!voice.isNetworkConnectionRequired() && voice.getLocale().equals(language)) { tts.setVoice(voice); break; }
+            }
+        }
+    }
+    public void stop() {
+        if (Looper.myLooper() != Looper.getMainLooper()) { main.post(this::stop); return; }
+        if (destroyed) return;
+        answeringQuestion = false; listening = false; afterSpeech = null; utterance++; queued = null;
+        if (recognizer != null) recognizer.cancel(); if (tts != null) tts.stop();
+    }
+    public void destroy() {
+        if (Looper.myLooper() != Looper.getMainLooper()) { main.post(this::destroy); return; }
+        if (destroyed) return;
+        stop(); destroyed = true;
+        if (recognizer != null) recognizer.destroy(); if (tts != null) tts.shutdown();
+    }
     @Override public void onResults(Bundle results) {
         if (destroyed || !listening) return;
         listening = false;

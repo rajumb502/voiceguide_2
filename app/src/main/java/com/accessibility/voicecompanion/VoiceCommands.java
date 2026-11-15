@@ -6,10 +6,14 @@ import java.util.Locale;
 /** Small offline command vocabulary; other requests are sent to the selected assistant. */
 public final class VoiceCommands {
     public static final String HELP = "Tap Speak, wait for the tone, then say your command. "
-        + "Try: open a website; read this page; list links; list buttons; scroll down; scroll up; go back; or help. "
+        + "Try: open a website; read this page; list links; list buttons; scroll down; scroll up; go back; open app followed by its name; or help. "
         + "With an API key in Settings, tell me a goal such as find an article, search this site, or help fill a form. I will inspect the page and work through the steps. Tap Speak to interrupt, or Stop to cancel. "
         + "For a proposed click, tap Speak again and say yes or no.";
     public static String normalize(String text) { return text.trim().toLowerCase(Locale.ROOT).replaceAll("[.!?]+$", "").replaceAll("\\s+", " "); }
+    public static String appName(String text) {
+        String normalized = normalize(text);
+        return normalized.startsWith("open app ") ? normalized.substring(9).trim() : null;
+    }
     public static String navigationUrl(String text) {
         String value = text.trim().replaceAll("[.!?]+$", "").replaceFirst("(?i)^(?:please )?(?:go to|open|visit|navigate to)\\s+", "");
         value = value.replaceAll("(?i)\\s+dot\\s+", ".").replaceAll("\\s*\\.\\s*", ".");

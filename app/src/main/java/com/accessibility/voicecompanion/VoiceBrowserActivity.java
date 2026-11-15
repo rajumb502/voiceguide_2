@@ -25,7 +25,8 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
     private TextView status;
     private EditText address;
     private VoiceEngineManager voice;
-    private final ConversationMemory conversation = new ConversationMemory();
+    private ConversationMemory conversation;
+    private final SharingConsent sharing = new SharingConsent();
     private final AgentSession agent = new AgentSession();
     private final Handler main = new Handler(Looper.getMainLooper());
     private JSONObject pendingProposal, pendingSnapshot;
@@ -42,7 +43,8 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
-        settings = new AssistantSettings(this);
+        try { settings = new AssistantSettings(this); conversation = new ConversationMemory(this); }
+        catch (IllegalStateException e) { Toast.makeText(this,"Encrypted storage is unavailable. Saved data has been kept; please try again.",Toast.LENGTH_LONG).show(); finish(); return; }
         locale = settings.locale();
         LinearLayout root = new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(12, 24, 12, 12); setContentView(root);
@@ -73,6 +75,7 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
         web.setWebViewClient(new WebViewClient() {
             @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) { return !isWebUrl(request.getUrl().toString()); }
             @Override public void onPageStarted(WebView view, String url, Bitmap icon) {
+                sharing.revoke();
                 navigation++; pageLoading = true; loadStarted = SystemClock.elapsedRealtime(); pageFailed = false;
                 if (agent.running() && agentActing) { requestId++; busy = false; guard.clear(); }
                 else cancel();
@@ -111,7 +114,7 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
     }
     @Override protected void onNewIntent(Intent intent) { super.onNewIntent(intent); if (intent.getData() != null) open(intent.getData().toString()); }
     private void listen() {
-        if (agent.running()) {
+        if (agent.running() && !sharing.pending()) {
             agent.ask(); requestId++; busy = false; agentActing = false;
             if (continuation != null) main.removeCallbacks(continuation);
         }
@@ -125,6 +128,7 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
     }
     @Override public void feedback(String text) { status.setText(text); }
     private void cancel() {
+        sharing.revoke();
         requestId++; busy = false; agentActing = false; agent.stop(); guard.clear(); pendingProposal = pendingSnapshot = null;
         if (continuation != null) main.removeCallbacks(continuation);
     }
@@ -140,18 +144,41 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
             return;
         }
         if (VoiceCommands.normalize(text).matches("stop|cancel|no|नहीं")) { cancel(); voice.speak("Stopped."); return; }
+        if (sharing.pending()) {
+            SharingConsent.Reply reply = sharing.evaluate(text,navigation,SystemClock.elapsedRealtime());
+            if (reply.status() == SharingConsent.Status.ALLOWED) {
+                try {
+                    settings.approveSite(settings.provider(),Uri.parse(web.getUrl()).getHost());
+                    requestAssistant(reply.command());
+                } catch (IllegalStateException | IllegalArgumentException e) { cancel(); voice.speak("I could not save this site's sharing approval. Nothing was sent. Please try again or review Settings."); }
+            }
+            else if (reply.status() == SharingConsent.Status.UNCLEAR) {
+                if (!localCommand(text)) voice.ask("Say yes to remember this site's sharing approval for " + settings.provider() + ", or no to stay local. You can remove approvals in Settings.",locale);
+            } else { cancel(); voice.speak("Page sharing cancelled or expired. Local reading and navigation are available."); }
+            return;
+        }
         if (preferenceCommand(text)) return;
-        if (agent.waiting()) { remember("User: " + text); agent.answer(text); requestAssistant(agent.goal()); return; }
         if (localCommand(text)) return;
+        if (agent.waiting()) { remember("User: " + text); agent.answer(text); requestAssistant(agent.goal()); return; }
         if (busy) { voice.speak("I am still checking. Say stop to cancel."); return; }
         if (!settings.sharingEnabled()) { voice.speak("AI page sharing is off. You can enable it in Settings, or use local page reading and navigation."); return; }
-        if (agent.waiting()) agent.answer(text); else agent.start(text);
+        agent.start(text);
         remember("User goal or clarification: " + text);
         requestAssistant(agent.goal());
     }
     private void requestAssistant(String text) {
         if (!active || !settings.sharingEnabled() || !agent.running()) return;
         if (pageLoading) { scheduleObservation(500); return; }
+        String site = Uri.parse(web.getUrl() == null ? "" : web.getUrl()).getHost();
+        if (site == null) { cancel(); voice.speak("Open a website before asking the assistant."); return; }
+        if (!sharing.allows(site,settings.provider(),navigation) && settings.siteSharingAllowed(site,settings.provider())) sharing.grant(site,settings.provider(),navigation);
+        if (!sharing.allows(site,settings.provider(),navigation)) {
+            if (!sharing.pending()) {
+                sharing.request(text,navigation,SystemClock.elapsedRealtime(),site,settings.provider());
+                voice.ask("Allow sharing page details from " + site + ", your request and task history, this site's conversation, and enabled saved preferences and screenshots with " + settings.provider() + "? Say yes to remember this site for future visits, or no. You can change this in Settings.",locale);
+            }
+            return;
+        }
         if (!agent.nextStep()) { voice.speak("I reached the task's step limit. Tap Speak to give a new instruction."); return; }
         agentActing = false;
         final String provider = settings.provider(), model = settings.model(provider), apiKey;
@@ -166,22 +193,31 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
                 Object decoded = new JSONTokener(raw).nextValue();
                 if (!(decoded instanceof String)) throw new JSONException("No page snapshot");
                 JSONObject snapshot = new JSONObject((String) decoded);
-                JSONObject payload = new JSONObject().put("command", text).put("snapshot", snapshot).put("conversation_history", conversation.snapshot()).put("current_page",ConversationMemory.page(web.getUrl(),web.getTitle(),navigation)).put("task_history",new JSONArray(agent.history()));
-                if (settings.rememberPreferences()) payload.put("user_preferences",settings.userPreferences());
+                if (!sharing.allows(snapshot.getString("site"),provider,nav)) { cancel(); voice.speak("The page changed. Please ask again."); return; }
+                JSONObject payload = new JSONObject().put("command", text).put("snapshot", snapshot).put("conversation_history", conversation.snapshot(snapshot.getString("site"))).put("current_page",ConversationMemory.page(web.getUrl(),web.getTitle(),navigation)).put("task_history",new JSONArray(agent.history()));
+                if (settings.rememberPreferences()) payload.put("user_preferences","Preferred language: " + settings.locale() + "\n" + settings.userPreferences());
+                Bitmap captured = null;
                 if (settings.screenshotsEnabled() && !snapshot.getBoolean("sensitive")) {
                     int width = web.getWidth(), height = web.getHeight();
                     if (width <= 0 || height <= 0) throw new IllegalStateException("Page has no viewport");
-                    float scale = Math.min(1f, 1000f / Math.max(width, height));
+                    float scale = Math.min(1f, 720f / Math.max(width, height));
                     Bitmap bitmap = Bitmap.createBitmap(Math.max(1,(int)(width*scale)), Math.max(1,(int)(height*scale)), Bitmap.Config.ARGB_8888);
-                    Canvas canvas = new Canvas(bitmap); canvas.scale(scale, scale); web.draw(canvas);
-                    ByteArrayOutputStream bytes = new ByteArrayOutputStream(); bitmap.compress(Bitmap.CompressFormat.JPEG,70,bytes); bitmap.recycle();
-                    payload.put("image", Base64.encodeToString(bytes.toByteArray(), Base64.NO_WRAP));
+                    try { Canvas canvas = new Canvas(bitmap); canvas.scale(scale, scale); web.draw(canvas); captured = bitmap; }
+                    catch (RuntimeException e) { bitmap.recycle(); throw e; }
                 }
+                final Bitmap bitmap = captured;
                 worker.submit(() -> {
                     try {
-                        JSONObject response = AssistantClient.request(provider, model, apiKey, payload);
+                        if (bitmap != null) {
+                            try {
+                                ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+                                if (!bitmap.compress(Bitmap.CompressFormat.JPEG,70,bytes)) throw new IOException("Could not encode screenshot");
+                                payload.put("image", Base64.encodeToString(bytes.toByteArray(), Base64.NO_WRAP));
+                            } finally { bitmap.recycle(); }
+                        }
+                        JSONObject response = AssistantClient.request(provider, model, apiKey, payload,sharing,nav,settings);
                         runOnUiThread(() -> { if (valid(job, nav)) { busy = false; apply(response, snapshot, nav); } });
-                    } catch (Exception e) { runOnUiThread(() -> { if (valid(job,nav)) { cancel(); voice.speak(e instanceof AssistantClient.RequestFailure ? e.getMessage() : "The assistant could not respond. Check your connection, provider and model settings, then try again."); } }); }
+                    } catch (Exception e) { runOnUiThread(() -> { if (valid(job,nav)) { cancel(); voice.speak(e instanceof AssistantClient.RequestFailure ? e.getMessage() : "The assistant could not connect. You can still say scroll down, go back, read this page, or open app followed by an app name."); } }); }
                 });
             } catch (Exception e) { cancel(); voice.speak("Could not inspect this page. Try reloading it."); }
         });
@@ -207,11 +243,32 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
     }
     private boolean localCommand(String text) {
         String command = VoiceCommands.normalize(text);
+        String app = VoiceCommands.appName(text);
+        if (app != null) {
+            cancel();
+            Intent launcher = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER);
+            android.content.pm.ResolveInfo match = null;
+            for (android.content.pm.ResolveInfo candidate : getPackageManager().queryIntentActivities(launcher,0)) {
+                if (app.equals(VoiceCommands.normalize(candidate.loadLabel(getPackageManager()).toString())) || app.equals(candidate.activityInfo.packageName)) {
+                    if (match != null && !match.activityInfo.packageName.equals(candidate.activityInfo.packageName)) { voice.speak("More than one app has that name. Say open app followed by its package name."); return true; }
+                    match = candidate;
+                }
+            }
+            if (match == null) voice.speak("I could not find an installed app with that name.");
+            else {
+                try { startActivity(new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setClassName(match.activityInfo.packageName,match.activityInfo.name)); }
+                catch (RuntimeException e) { voice.speak("That app could not be opened."); }
+            }
+            return true;
+        }
         String url = VoiceCommands.navigationUrl(text);
         if (url != null) { cancel(); voice.speak("Opening " + Uri.parse(url).getHost()); open(url); return true; }
         switch (command) {
             case "clear conversation": case "forget conversation":
-                cancel(); conversation.clear(); voice.speak("Conversation cleared. I have forgotten previous page descriptions and requests."); return true;
+                cancel();
+                try { conversation.clear(); voice.speak("Conversation cleared. I have forgotten previous page descriptions and requests."); }
+                catch (IllegalStateException e) { voice.speak("Could not clear saved conversation. Please try again."); }
+                return true;
             case "help": case "what can i say": case "what can you do":
                 cancel(); voice.speak(VoiceCommands.HELP); return true;
             case "settings": case "open settings": settings(); return true;
@@ -299,7 +356,10 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
             if (AgentPolicy.needsConfirmation(response,snapshot)) {
                 pendingProposal = response; pendingSnapshot = snapshot;
                 guard.queue(new ActionSafetyGuard.Pending(response.getString("target_id"),snapshot.getLong("revision"),nav,SystemClock.elapsedRealtime(),response.getString("action_summary")));
-                String question = "I am about to " + response.getString("action_summary") + ". After the tone, say yes to approve or no to cancel.";
+                main.postDelayed(() -> {
+                    if (guard.hasPending() && pendingProposal == response) { cancel(); voice.speak("Confirmation expired. Please ask again."); }
+                },ActionSafetyGuard.TIMEOUT_MS);
+                String question = "Approve " + response.getString("action_summary") + "? Say yes or no within thirty seconds.";
                 remember("Assistant confirmation: " + question);
                 agent.ask(); voice.ask(question,locale); return;
             }
@@ -338,14 +398,22 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
     }
     private void remember(String text) {
         String role = text.startsWith("User") ? "user" : text.startsWith("Page loaded:") ? "page" : "assistant";
-        conversation.add(role,text,web == null ? null : web.getUrl(),web == null ? null : web.getTitle(),navigation);
+        try { conversation.add(role,text,web == null ? null : web.getUrl(),web == null ? null : web.getTitle(),navigation); }
+        catch (IllegalStateException e) { Toast.makeText(this,"Could not save conversation on this device.",Toast.LENGTH_LONG).show(); }
     }
     private void settings() {
         cancel(); voice.stop();
         startActivity(new Intent(this, SettingsActivity.class));
     }
-    @Override protected void onResume() { super.onResume(); active = true; locale = settings.locale(); }
+    @Override protected void onResume() { super.onResume(); active = true; if (settings != null) { locale = settings.locale(); if (voice != null) voice.setLanguage(locale); } }
     @Override protected void onPause() { active = false;
         cancel(); if (voice != null) voice.stop(); super.onPause(); }
-    @Override protected void onDestroy() { voice.destroy(); web.destroy(); worker.shutdownNow(); super.onDestroy(); }
+    @Override protected void onDestroy() {
+        main.removeCallbacksAndMessages(null);
+        if (voice != null) voice.destroy();
+        if (web != null) { ((android.view.ViewGroup)web.getParent()).removeView(web); web.destroy(); }
+        worker.shutdown();
+        if (conversation != null) conversation.close();
+        super.onDestroy();
+    }
 }

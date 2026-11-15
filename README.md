@@ -24,9 +24,10 @@ spoken progress, final descriptions, local readouts, and page references. Each m
 records its page title, site, path, and page ID; URL queries and fragments are omitted.
 A fresh task can therefore refer to an ad or item described during the previous task.
 The model receives the current page separately and must check it before reusing old facts.
-Memory survives briefly switching away from the browser while the activity remains alive;
-leaving the screen still cancels automation. Sharing follows the saved Settings switches. Memory is not
-saved to disk and is lost when the browser activity is recreated or the process exits.
+Memory is encrypted with Android Keystore and saved in a bounded SQLite record across
+activity recreation and process exits. Only conversation from the current site is shared
+under the saved sharing approvals; leaving the screen cancels automation and pending
+uploads, while saved site approvals remain available for the next visit.
 Say “clear conversation” outside a pending question to erase it explicitly.
 
 Available actions are CLICK, TYPE, SUBMIT, SCROLL, NAVIGATE, BACK, WAIT, ASK and DONE.
@@ -35,6 +36,7 @@ the task. Ordinary links and recognizable search inputs can be used automaticall
 Unknown controls, ordinary form fields, non-search submissions, downloads and actions
 involving payments, sending, account changes or deletion require confirmation. Model
 risk flags and local rules both apply; these heuristics are not a complete risk detector.
+An unapproved action expires after 30 seconds and cannot be approved after navigation.
 
 After any operation the next request contains a fresh page snapshot. A dispatched click
 or submission is not proof of task completion. The model is instructed to verify the
@@ -49,7 +51,8 @@ The task pauses while a page loads and stops if loading takes too long.
 
 Local commands remain available outside an active question: “go to example dot com”,
 “read this page”, “list links”, “list buttons”, “scroll down”, “scroll up”, “go back”,
-“find search box”, and “help”. With TalkBack, swipe to Speak and double-tap to activate it.
+“find search box”, “open app Calculator”, and “help”. App launching uses installed launcher
+labels or exact package names. With TalkBack, swipe to Speak and double-tap to activate it.
 
 ## Settings and sharing
 
@@ -60,15 +63,35 @@ Local commands remain available outside an active question: “go to example dot
    current provider's edited values are saved by Save.
 4. Optionally change speech recognition from en-IN to hi-IN or another language tag.
 
-Keys are encrypted using AES-GCM and Android Keystore. The settings screen masks input
+Settings starts a spoken setup sequence for microphone access, Accessibility settings,
+and the default Home app. Continue and Skip buttons remain available. Accessibility and
+Home selection are optional; enabling the dormant accessibility service does not add
+native app control. The app qualifies as a Home candidate through its HOME intent filter.
+
+Settings and profile notes use EncryptedSharedPreferences backed by Android Keystore;
+existing AES-GCM encrypted API keys are preserved during migration. Legacy settings are
+cleared only after the encrypted copy commits successfully. The settings screen masks input
 and blocks screenshots. Leave the key field blank to retain a saved key, enter a new
 key to replace it, or use Remove saved key. Keys are never sent to page JavaScript, put
 in URLs, or included in application errors. Backups are disabled. A compromised device
 can still expose credentials. Provider use is billed to the user's API account.
 
 Page sharing is configured in Settings. **Allow sending page details and conversation**
-and **Include page screenshots** both default to Yes. There is no repeated sharing
-question. Turn page sharing off to block AI requests and retain local reading/navigation;
+and **Include page screenshots** both default to Yes. An unknown site first needs spoken
+consent naming the site and selected provider. Saying Yes saves that exact hostname for
+that provider in encrypted settings across navigation, backgrounding, and app restarts.
+Subdomains and other providers need separate approval. Settings lists approved hostnames
+for the selected provider; add or remove entries, then Save settings to apply.
+
+**Allow all sites without asking for this provider** defaults to Off. Turn it on and Save
+to allow any site to share page details, conversation, and enabled screenshots/profile
+notes with the selected provider. **Clear sharing approvals for this provider** empties
+the site list and turns off this override; Save settings to apply. These choices are
+independent for Gemini and OpenAI, and Save applies to the currently selected provider.
+
+Sharing is checked again at the HTTP boundary, including fallback requests. Navigation,
+cancellation, and leaving the browser still invalidate pending uploads and action approvals.
+Turn page sharing off to block AI requests and retain local reading/navigation;
 turn screenshots off to send only text and page metadata. These choices persist across
 restarts and apply to both providers. Sensitive-page screenshot suppression still applies.
 Consequential browser actions retain their separate spoken confirmation.
@@ -78,7 +101,7 @@ Consequential browser actions retain their separate spoken confirmation.
 Settings includes **Remember and use my feedback preferences** (default Yes) and an
 editable list of saved preferences. These are app-private local settings, shared across
 providers on this installation, and persist across restarts. Enabled preferences are
-included in future requests; disabling the switch stops saving voice feedback and omits
+included in future consented requests; disabling the switch stops saving voice feedback and omits
 the saved profile from requests without deleting the saved notes.
 
 Examples of local voice commands:
@@ -99,10 +122,19 @@ does not erase saved preferences; use Forget my preferences or Settings to remov
 
 The provider receives the goal, enabled saved preferences, spoken context, action history, conversation page references, visible labels, field
 metadata, page title/site name, viewport information, link destinations, and optional
-screenshots. Extracted labels omit form values. Screenshots can contain private text;
-they are omitted when recognized sensitive input fields are present. This detection is
+screenshots. Extracted labels omit form values and recognized password/OTP/card nodes.
+Screenshots are bounded to 720 pixels on either edge, encoded at JPEG quality 70 on a
+worker thread, and omitted for recognized sensitive fields, editable content, or iframes. This detection is
 incomplete. Passwords, OTP, file inputs and recognized card fields cannot be typed by
-the executor. Native speech recognition may also contact its provider.
+the executor. Speech uses on-device recognition when available (Android 12+) and otherwise
+requests offline recognition; a recognizer may still require a network connection.
+Installed offline TTS voices are preferred for the selected language.
+
+Gemini defaults to gemini-2.5-flash-lite; existing model choices remain saved. A transient
+network error, quota response, or server failure retries once without an image, using
+Flash-Lite for Gemini and the selected model for OpenAI. Retries stay with the consented
+provider and key. Authentication and invalid-request errors do not retry. If both requests
+fail, local reading, scrolling, back navigation, and app launching remain available.
 
 ## Build and verification
 
@@ -111,12 +143,13 @@ Use JDK 17 and Android SDK 35. Open the project in Android Studio, or run:
 ```bash
 ./gradlew :app:assembleDebug
 ./gradlew :app:testDebugUnitTest
+./gradlew :app:connectedDebugAndroidTest
 ```
 
 Run on Android 8.0+ with speech recognition and TTS installed. No backend URL or server
 token is needed. backend/server.py remains an unused reference from the first prototype.
 
-Java sources have compiled against the locally installed SDK 35. Offline host checks
+The debug APK builds against SDK 35. JVM checks
 cover provider context redaction, consent, navigation, the generic agent state/policy,
 step/failure limits, target validation, and typing/submission on two simulated site
 fixtures. JavaScript checks can be run with:
@@ -126,9 +159,14 @@ node tests/page.test.js
 node tests/agent-page.test.js
 ```
 
+Instrumented tests cover saved site approvals and all-sites overrides, provider isolation,
+revocation and the master sharing switch, encrypted settings migration, conversation persistence/clearing,
+corruption handling, request consent/thread checks, voice lifecycle calls from a worker,
+and real WebView redaction and clicks inside a shadow root created with closed mode.
+
 These are simulated operations, not live model or real-browser task-completion tests.
-The generic loop has not yet been validated end-to-end with either provider on a device,
-and a complete APK build has not been verified in this agent session. Test a public
+The generic loop has not yet been validated end-to-end with either provider on a device.
+Test a public
 information/search task before trying personal forms. Check interruption during a slow
 response, spoken clarifications, navigation, denied confirmation, failed typing, and
 recovery from a changing page.
@@ -140,7 +178,8 @@ For the observed NVIDIA decoder emulator crash and its workaround, see
 
 The executor controls this app's embedded browser. It does not control other Android
 apps or provide general OS access. The declared AccessibilityService remains inactive.
-AgentSession contains task state independently of the browser/provider, allowing a
+No background microphone is started, so foreground microphone service declarations
+are unnecessary. AgentSession contains task state independently of the browser/provider, allowing a
 future native-app driver to use the same task model; that driver is not implemented.
 
 The DOM bridge sees up to 150 visible labelled elements in the main document and open

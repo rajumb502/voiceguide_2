@@ -36,6 +36,9 @@ public class ConversationMemoryTest {
         memory.add("page","Different page now","https://museum.example/hours","Museum hours",8);
         check(memory.snapshot().getJSONObject(1).getJSONObject("page").getString("site").equals("amazon.in"));
         check(memory.snapshot().getJSONObject(3).getJSONObject("page").getString("site").equals("museum.example"));
+        check(memory.snapshot("amazon.in").length()==3);
+        check(memory.snapshot("museum.example").length()==1);
+        check(memory.snapshot("unknown.example").length()==0);
         for (int i=0;i<40;i++) memory.add("assistant","Long text "+"x".repeat(3000),"https://example.com/","Example",9);
         check(memory.snapshot().length()<=24); check(memory.snapshot().toString().length()<=16000);
         memory.clear(); check(memory.snapshot().length()==0);

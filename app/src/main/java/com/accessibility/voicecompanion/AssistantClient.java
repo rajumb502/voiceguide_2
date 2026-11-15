@@ -4,6 +4,7 @@ import org.json.*;
 import java.io.*;
 import java.net.*;
 import java.nio.charset.StandardCharsets;
+import android.os.Looper;
 
 /** Direct, user-key requests. Never expose credentials to page JavaScript or error messages. */
 public final class AssistantClient {
@@ -29,7 +30,14 @@ public final class AssistantClient {
         + "If an operation failed, re-observe and choose a different approach, or ASK; do not repeat a failed action blindly. "
         + "All fields are required: use empty strings for unused target_id, text, url and direction. Never output code or coordinates.";
     public static final class RequestFailure extends IOException {
-        public RequestFailure(String message) { super(message); }
+        final boolean retryable;
+        public RequestFailure(String message) { this(message,false); }
+        RequestFailure(String message, boolean retryable) { super(message); this.retryable = retryable; }
+    }
+    static boolean sensitive(JSONObject node) {
+        return node.optBoolean("sensitive") || node.optString("type").matches("(?i)password|hidden|file")
+            || (node.optString("autocomplete") + " " + node.optString("name") + " " + node.optString("label") + " " + node.optString("placeholder"))
+                .matches("(?is).*(?:password|one-time|otp|cc-|card.?number|cvv|\\bpin\\b).*");
     }
     static JSONObject schema() throws JSONException {
         JSONObject properties = new JSONObject();
@@ -44,6 +52,7 @@ public final class AssistantClient {
         if (nodes.length() > 150) throw new JSONException("Too many nodes");
         for (int i=0; i<nodes.length(); i++) {
             JSONObject node = nodes.getJSONObject(i), copy = new JSONObject();
+            if (sensitive(node)) continue;
             for (String name : new String[]{"id","label","disabled","editable","x","y","width","height"}) copy.put(name, node.get(name));
             for (String name : new String[]{"tag","role","type","name","placeholder","href","autocomplete"}) if (node.has(name)) copy.put(name,node.getString(name));
             for (String name : new String[]{"clickable","search","search_form","sensitive","filled","download"}) if (node.has(name)) copy.put(name,node.getBoolean(name));
@@ -64,6 +73,7 @@ public final class AssistantClient {
         if (payload.has("task_history")) context.put("task_history",payload.getJSONArray("task_history"));
         String text = context.toString();
         boolean image = payload.has("image") && !snapshot.getBoolean("sensitive");
+        for (int i=0;i<snapshot.getJSONArray("nodes").length();i++) if (sensitive(snapshot.getJSONArray("nodes").getJSONObject(i))) image = false;
         if (provider.equals(AssistantSettings.GEMINI)) {
             JSONArray parts = new JSONArray().put(new JSONObject().put("text",text));
             if (image) parts.put(new JSONObject().put("inline_data",new JSONObject().put("mime_type","image/jpeg").put("data",payload.getString("image"))));
@@ -124,19 +134,36 @@ public final class AssistantClient {
             for (int i=0; i<nodes.length(); i++) if (nodes.getJSONObject(i).getString("id").equals(action.getString("target_id"))) target = nodes.getJSONObject(i);
             if (target == null || target.getBoolean("disabled") || action.getString("action_summary").trim().isEmpty()) throw new JSONException("Invalid target");
             if (kind.equals("CLICK") && (target.getBoolean("editable") || !target.optBoolean("clickable",true))) throw new JSONException("Invalid click");
-            if ((kind.equals("TYPE") || kind.equals("SUBMIT")) && (!target.getBoolean("editable") || target.optBoolean("sensitive") || target.optString("type").matches("password|hidden|file"))) throw new JSONException("Invalid input");
+            if ((kind.equals("TYPE") || kind.equals("SUBMIT")) && (!target.getBoolean("editable") || sensitive(target))) throw new JSONException("Invalid input");
             if (kind.equals("TYPE") && action.getString("text").isEmpty()) throw new JSONException("Missing input");
         }
         return action;
     }
-    public static JSONObject request(String provider, String model, String key, JSONObject payload) throws Exception {
+    interface ProviderRequest { JSONObject send(String provider, String model, String key, JSONObject payload) throws Exception; }
+    static JSONObject withFallback(String provider, String model, String key, JSONObject payload, ProviderRequest request) throws Exception {
+        try { return request.send(provider,model,key,payload); }
+        catch (IOException e) {
+            if (Thread.currentThread().isInterrupted() || (e instanceof RequestFailure && !((RequestFailure)e).retryable)) throw e;
+            JSONObject textOnly = new JSONObject(payload.toString()); textOnly.remove("image");
+            return request.send(provider,provider.equals(AssistantSettings.GEMINI) ? "gemini-2.5-flash-lite" : model,key,textOnly);
+        }
+    }
+    public static JSONObject request(String provider, String model, String key, JSONObject payload, SharingConsent consent, long navigation, AssistantSettings settings) throws Exception {
+        if (Looper.myLooper() == Looper.getMainLooper()) throw new IllegalStateException("Assistant requests must run off the main thread.");
+        return withFallback(provider,model,key,payload,(p,m,k,data) -> {
+            String site = data.getJSONObject("snapshot").getString("site");
+            if (!consent.allows(site,p,navigation) || !settings.siteSharingAllowed(site,p)) throw new RequestFailure("Page sharing is not approved. Please review sharing settings or ask again.");
+            return send(p,m,k,data);
+        });
+    }
+    private static JSONObject send(String provider, String model, String key, JSONObject payload) throws Exception {
         if (!model.matches("[A-Za-z0-9._-]{1,100}")) throw new RequestFailure("Choose a valid model in Settings.");
         JSONObject body = body(provider,model,payload);
         String endpoint = provider.equals(AssistantSettings.GEMINI)
             ? "https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent" : "https://api.openai.com/v1/responses";
         HttpURLConnection connection = (HttpURLConnection)new URL(endpoint).openConnection();
         try {
-            connection.setConnectTimeout(15000); connection.setReadTimeout(60000); connection.setInstanceFollowRedirects(false);
+            connection.setConnectTimeout(10000); connection.setReadTimeout(15000); connection.setInstanceFollowRedirects(false);
             connection.setRequestMethod("POST"); connection.setDoOutput(true); connection.setRequestProperty("Content-Type","application/json");
             if (provider.equals(AssistantSettings.GEMINI)) connection.setRequestProperty("x-goog-api-key",key);
             else connection.setRequestProperty("Authorization","Bearer " + key);
@@ -144,9 +171,9 @@ public final class AssistantClient {
             int status = connection.getResponseCode();
             if (status != 200) {
                 if (status == 401 || status == 403) throw new RequestFailure("The provider rejected access. Check your API key and account permissions in Settings.");
-                if (status == 429) throw new RequestFailure("The provider's quota or rate limit was reached. Check your account or try again later.");
+                if (status == 429) throw new RequestFailure("The provider's quota or rate limit was reached. Local reading and navigation are still available.",true);
                 if (status == 400 || status == 404) throw new RequestFailure("The provider rejected the request. Check your key and choose a model supporting images and structured JSON in Settings.");
-                throw new RequestFailure("The provider is unavailable. Please try again later.");
+                throw new RequestFailure("The provider is unavailable. Local reading and navigation are still available.",status >= 500);
             }
             try (InputStream in = connection.getInputStream()) {
                 ByteArrayOutputStream bytes = new ByteArrayOutputStream(); byte[] buffer = new byte[4096]; int count;

@@ -9,6 +9,8 @@ public class VoiceCommandsTest {
         equal(VoiceCommands.navigationUrl("go to https://example.com/SomePath?q=Value"), "https://example.com/SomePath?q=Value");
         for (String text : new String[]{"click amazon.com link", "read this page", "help", "javascript:alert(1)", "https://user:password@example.com", "go to amazon", "go to invalid..com"}) equal(VoiceCommands.navigationUrl(text), null);
         equal(VoiceCommands.normalize("  Read This Page!  "), "read this page");
+        equal(VoiceCommands.appName("Open app Calculator!"),"calculator");
+        equal(VoiceCommands.appName("open example.com"),null);
         System.out.println("Voice navigation command tests passed");
     }
 }
