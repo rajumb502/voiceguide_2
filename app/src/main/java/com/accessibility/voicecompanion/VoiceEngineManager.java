@@ -4,6 +4,8 @@ import android.content.Context;
 import android.content.Intent;
 import android.os.Bundle;
 import android.os.Build;
+import android.media.AudioAttributes;
+import android.media.AudioFocusRequest;
 import android.media.AudioManager;
 import android.media.ToneGenerator;
 import android.os.Handler;
@@ -21,6 +23,8 @@ public final class VoiceEngineManager implements RecognitionListener {
     private final Context context;
     private SpeechRecognizer recognizer;
     private TextToSpeech tts;
+    private AudioManager audioManager;
+    private AudioFocusRequest focusRequest;
     private final Handler main = new Handler(Looper.getMainLooper());
     private boolean ready, destroyed, onDevice;
     private String queued;
@@ -61,6 +65,38 @@ public final class VoiceEngineManager implements RecognitionListener {
             @Override public void onError(String id) { main.post(() -> { if (id.equals(Long.toString(utterance))) afterSpeech = null; }); }
         });
     }
+    private void requestAudioFocus() {
+        try {
+            if (audioManager == null) audioManager = (AudioManager) context.getSystemService(Context.AUDIO_SERVICE);
+            if (audioManager != null) {
+                if (Build.VERSION.SDK_INT >= 26) {
+                    if (focusRequest == null) {
+                        focusRequest = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE)
+                            .setAudioAttributes(new AudioAttributes.Builder()
+                                .setUsage(AudioAttributes.USAGE_ASSISTANCE_ACCESSIBILITY)
+                                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                                .build())
+                            .setOnAudioFocusChangeListener(focusChange -> {})
+                            .build();
+                    }
+                    audioManager.requestAudioFocus(focusRequest);
+                } else {
+                    audioManager.requestAudioFocus(null, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE);
+                }
+            }
+        } catch (RuntimeException ignored) {}
+    }
+    private void abandonAudioFocus() {
+        try {
+            if (audioManager != null) {
+                if (Build.VERSION.SDK_INT >= 26 && focusRequest != null) {
+                    audioManager.abandonAudioFocusRequest(focusRequest);
+                } else {
+                    audioManager.abandonAudioFocus(null);
+                }
+            }
+        } catch (RuntimeException ignored) {}
+    }
     public void listen(String locale) {
         if (Looper.myLooper() != Looper.getMainLooper()) { main.post(() -> listen(locale)); return; }
         if (destroyed) return;
@@ -77,8 +113,15 @@ public final class VoiceEngineManager implements RecognitionListener {
         callback.feedback("Starting microphone…");
         main.postDelayed(() -> {
             if (destroyed || attempt != utterance) return;
-            try { listening = true; recognizer.startListening(intent); }
-            catch (RuntimeException e) { listening = false; speak("Could not start the microphone. Check microphone permission and speech recognition settings."); }
+            try {
+                requestAudioFocus();
+                listening = true;
+                recognizer.startListening(intent);
+            } catch (RuntimeException e) {
+                listening = false;
+                abandonAudioFocus();
+                speak("Could not start the microphone. Check microphone permission and speech recognition settings.");
+            }
         }, 150);
     }
     public void speak(String text) {
@@ -99,6 +142,7 @@ public final class VoiceEngineManager implements RecognitionListener {
     private void say(String text) {
         if (destroyed) return;
         utterance++; listening = false;
+        abandonAudioFocus();
         if (recognizer != null) recognizer.cancel();
         callback.feedback(text);
         if (ready) tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, Long.toString(utterance)); else queued = text;
@@ -117,15 +161,18 @@ public final class VoiceEngineManager implements RecognitionListener {
         if (Looper.myLooper() != Looper.getMainLooper()) { main.post(this::stop); return; }
         if (destroyed) return;
         answeringQuestion = false; listening = false; afterSpeech = null; utterance++; queued = null;
+        abandonAudioFocus();
         if (recognizer != null) recognizer.cancel(); if (tts != null) tts.stop();
     }
     public void destroy() {
         if (Looper.myLooper() != Looper.getMainLooper()) { main.post(this::destroy); return; }
         if (destroyed) return;
         stop(); destroyed = true;
+        abandonAudioFocus();
         if (recognizer != null) recognizer.destroy(); if (tts != null) tts.shutdown();
     }
     @Override public void onResults(Bundle results) {
+        abandonAudioFocus();
         if (destroyed || !listening) return;
         listening = false;
         ArrayList<String> matches = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
@@ -133,6 +180,7 @@ public final class VoiceEngineManager implements RecognitionListener {
         else retryQuestionOrSpeak("I did not hear a command. Tap Speak and try again.");
     }
     @Override public void onError(int error) {
+        abandonAudioFocus();
         if (destroyed || !listening || error == SpeechRecognizer.ERROR_CLIENT) return;
         listening = false;
         Log.w("VoiceEngineManager","Speech recognition error " + error + ", on-device: " + onDevice);

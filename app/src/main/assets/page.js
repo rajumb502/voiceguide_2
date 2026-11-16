@@ -4,6 +4,15 @@
   Element.prototype.attachShadow = function(options) {
     return nativeAttach.call(this, {...options, mode: 'open'});
   };
+  function notifyBridge() {
+    try {
+      const bridge = window.AndroidVoiceBridge || (window.parent && window.parent.AndroidVoiceBridge);
+      if (bridge && typeof bridge.setHostname === 'function') {
+        bridge.setHostname(location.hostname || '');
+      }
+    } catch (e) {}
+  }
+  notifyBridge();
   let revision = 0;
   const observed = new WeakSet();
   function observe(root) {
@@ -66,6 +75,7 @@
   }
   function snapshot() {
     targets = new Map(); const nodes = []; let sensitive = false;
+    notifyBridge();
     function walk(root) {
       observe(root);
       for (const el of root.querySelectorAll('*')) {
@@ -76,10 +86,31 @@
         if (!ids.has(el)) ids.set(el, String(++nextId));
         const id = ids.get(el), r = el.getBoundingClientRect();
         const privateField = el.matches('input,textarea,select');
-        if ((privateField && sensitiveField(el)) || el.isContentEditable) continue;
-        const node = {id, label: label(el), tag:el.tagName, role:el.getAttribute('role') || '', type:el.getAttribute('type') || '', name:el.getAttribute('name') || '', placeholder:el.getAttribute('placeholder') || '', autocomplete:el.getAttribute('autocomplete') || '', href:el.tagName === 'A' ? el.href || '' : '', download:el.hasAttribute ? el.hasAttribute('download') : false, clickable:el.matches('a,button,[role=button],[role=link]'), search:isSearch(el), search_form:searchForm(el), sensitive:privateField && sensitiveField(el), filled:privateField && !!el.value, disabled:!!el.disabled || el.getAttribute('aria-disabled') === 'true', editable:privateField,
-          x:r.x, y:r.y, width:r.width, height:r.height};
-        nodes.push(node); targets.set(id, {el, signature:signature(el), revision, value:privateField ? el.value : undefined});
+        const isSensitive = privateField && sensitiveField(el);
+        if (el.isContentEditable) continue;
+        const node = {
+          id,
+          label: isSensitive ? '[REDACTED]' : label(el),
+          tag: el.tagName,
+          role: el.getAttribute('role') || '',
+          type: el.getAttribute('type') || '',
+          name: isSensitive ? '[REDACTED]' : (el.getAttribute('name') || ''),
+          placeholder: isSensitive ? '[REDACTED]' : (el.getAttribute('placeholder') || ''),
+          autocomplete: el.getAttribute('autocomplete') || '',
+          href: el.tagName === 'A' ? el.href || '' : '',
+          download: el.hasAttribute ? el.hasAttribute('download') : false,
+          clickable: !isSensitive && el.matches('a,button,[role=button],[role=link]'),
+          search: !isSensitive && isSearch(el),
+          search_form: !isSensitive && searchForm(el),
+          sensitive: isSensitive,
+          filled: privateField && !!el.value,
+          disabled: !!el.disabled || el.getAttribute('aria-disabled') === 'true',
+          editable: privateField && !isSensitive,
+          x: r.x, y: r.y, width: r.width, height: r.height
+        };
+        if (isSensitive) node.value = '[REDACTED]';
+        nodes.push(node);
+        targets.set(id, {el, signature:signature(el), revision, value: privateField ? el.value : undefined});
       }
     }
     walk(document);

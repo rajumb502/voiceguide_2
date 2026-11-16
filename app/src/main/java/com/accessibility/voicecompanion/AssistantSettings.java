@@ -2,24 +2,14 @@ package com.accessibility.voicecompanion;
 
 import android.content.Context;
 import android.content.SharedPreferences;
-import android.security.keystore.KeyGenParameterSpec;
-import android.security.keystore.KeyProperties;
-import android.util.Base64;
 import androidx.security.crypto.EncryptedSharedPreferences;
 import androidx.security.crypto.MasterKey;
-import java.nio.charset.StandardCharsets;
-import java.security.KeyStore;
-import javax.crypto.Cipher;
-import javax.crypto.KeyGenerator;
-import javax.crypto.SecretKey;
-import javax.crypto.spec.GCMParameterSpec;
 import java.util.Set;
 import java.util.TreeSet;
 
 /** Provider preferences and API keys encrypted by a non-exportable Android Keystore key. */
 public final class AssistantSettings {
     public static final String GEMINI = "Gemini", OPENAI = "OpenAI";
-    private static final String ALIAS = "voice_companion_api_keys";
     private final SharedPreferences prefs;
     public AssistantSettings(Context context) {
         try {
@@ -72,31 +62,16 @@ public final class AssistantSettings {
                 .putBoolean("remember_preferences",remember).putString("user_preferences",notes.trim()).commit()) throw new IllegalStateException("Could not save preferences.");
     }
     public void saveUserPreferences(String notes) { saveGeneral(sharingEnabled(),screenshotsEnabled(),rememberPreferences(),notes); }
-    private static synchronized SecretKey encryptionKey() throws Exception {
-        KeyStore store = KeyStore.getInstance("AndroidKeyStore"); store.load(null);
-        if (store.containsAlias(ALIAS)) return (SecretKey) store.getKey(ALIAS, null);
-        KeyGenerator generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore");
-        generator.init(new KeyGenParameterSpec.Builder(ALIAS, KeyProperties.PURPOSE_ENCRYPT | KeyProperties.PURPOSE_DECRYPT)
-            .setBlockModes(KeyProperties.BLOCK_MODE_GCM).setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE).build());
-        return generator.generateKey();
-    }
     public String apiKey(String provider) throws Exception {
         String encoded = prefs.getString(provider + ".key", "");
         if (encoded.isEmpty()) return "";
         return decrypt(provider,encoded);
     }
     static String decrypt(String purpose, String encoded) throws Exception {
-        String[] parts = encoded.split(":", 2);
-        if (parts.length != 2) throw new IllegalArgumentException("Invalid encrypted value.");
-        Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
-        cipher.init(Cipher.DECRYPT_MODE, encryptionKey(), new GCMParameterSpec(128, Base64.decode(parts[0], Base64.NO_WRAP)));
-        cipher.updateAAD(purpose.getBytes(StandardCharsets.UTF_8));
-        return new String(cipher.doFinal(Base64.decode(parts[1], Base64.NO_WRAP)), StandardCharsets.UTF_8);
+        return KeystoreCryptoHelper.decrypt(purpose, encoded);
     }
     static String encrypt(String purpose, String text) throws Exception {
-        Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding"); cipher.init(Cipher.ENCRYPT_MODE,encryptionKey());
-        cipher.updateAAD(purpose.getBytes(StandardCharsets.UTF_8));
-        return Base64.encodeToString(cipher.getIV(),Base64.NO_WRAP) + ":" + Base64.encodeToString(cipher.doFinal(text.getBytes(StandardCharsets.UTF_8)),Base64.NO_WRAP);
+        return KeystoreCryptoHelper.encrypt(purpose, text);
     }
     public void save(String provider, String model, String key, String locale) throws Exception {
         if (!provider.equals(GEMINI) && !provider.equals(OPENAI)) throw new IllegalArgumentException("Invalid provider");

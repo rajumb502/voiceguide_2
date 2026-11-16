@@ -23,6 +23,11 @@ public final class SharingConsent {
         try { return hostname(domain).equals(allowedDomain) && provider != null && provider.equals(allowedProvider) && navigation == allowedNavigation; }
         catch (IllegalArgumentException e) { return false; }
     }
+    public synchronized boolean isDomainAllowed(String domain) {
+        if (domain == null) return false;
+        try { return hostname(domain).equals(allowedDomain); }
+        catch (IllegalArgumentException e) { return false; }
+    }
     public synchronized void grant(String domain, String provider, long navigation) {
         String host = hostname(domain);
         clear(); allowedDomain = host; allowedProvider = provider; allowedNavigation = navigation;

@@ -8,21 +8,21 @@
 ## Phase 1: Safety, Privacy & Hardware Confirmation (P0 — Must Have First)
 *Goal: Protect user credentials, OTPs, and money against bystander spoofing and accidental taps.*
 
-- [ ] **Task 1.1: Gradle Dependencies (`app/build.gradle`)**
+- [x] **Task 1.1: Gradle Dependencies (`app/build.gradle`)**
   - Add `androidx.webkit:webkit` (for reliable document-start script injection across frames).
   - Add JUnit 4, Robolectric, Mockito, and OkHttp `MockWebServer` test dependencies. *(Do NOT add deprecated `androidx.security:security-crypto`.)*
-- [ ] **Task 1.2: Sensitive Field Masking & Hostname Extraction (`VoiceBrowserActivity.java`)**
+- [x] **Task 1.2: Sensitive Field Masking & Hostname Extraction (`VoiceBrowserActivity.java`)**
   - Update the injected JS DOM scraper to mask `input[type="password"]`, `input[type="hidden"]`, and OTP/card fields as `"[REDACTED]"`, and pass `window.location.hostname` to `AndroidVoiceBridge`.
-- [ ] **Task 1.3: Per-Domain Consent Gate (`SharingConsent.java` & `AssistantClient.java`)**
+- [x] **Task 1.3: Per-Domain Consent Gate (`SharingConsent.java` & `AssistantClient.java`)**
   - Block Gemini uploads for unapproved domains and prompt the user via TTS (*"Allow sharing screen details on [hostname]? Say Yes or No"*).
-- [ ] **Task 1.4: Mandatory Hardware Volume Confirmation & 30s Timeout (`ActionSafetyGuard.java` & `VoiceBrowserActivity.java`)**
+- [x] **Task 1.4: Mandatory Hardware Volume Confirmation & 30s Timeout (`ActionSafetyGuard.java` & `VoiceBrowserActivity.java`)**
   - Enforce **physical Volume Up double-press** (within `1,200ms`) as the sole confirmation trigger for all high-stakes transactions (`pay`, `submit`, `confirm`, `transfer`, `delete`, `proceed`, `checkout`, `otp`).
   - Explicitly reject spoken `"Yes"`/`"Haan"` confirmations while a sensitive action is pending; allow Volume Down or spoken `"Cancel"`/`"Ruko"` to abort immediately.
   - Auto-expire pending actions after `30,000ms` with a spoken timeout alert.
   - Request `AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE` when `SpeechRecognizer` opens so background media/TV audio pauses automatically.
-- [ ] **Task 1.5: Encrypt Saved User Preferences (`UserPreferences.java` & `KeystoreCryptoHelper.java`)**
+- [x] **Task 1.5: Encrypt Saved User Preferences (`UserPreferences.java` & `KeystoreCryptoHelper.java`)**
   - Reuse the existing **Android Keystore (`AES/GCM/NoPadding`)** encryption pattern from `AssistantSettings.java` (or extract a shared `KeystoreCryptoHelper`) to encrypt saved consumer IDs, URLs, and profile snippets inside standard `SharedPreferences`, migrating and wiping any old plaintext values.
-- [ ] **Task 1.6: Phase 1 Verification Tests (`ActionSafetyGuardTest.java` & `SharingConsentTest.java`)**
+- [x] **Task 1.6: Phase 1 Verification Tests (`ActionSafetyGuardTest.java` & `SharingConsentTest.java`)**
   - Assert spoken `"Yes"`/`"Haan"` does **not** execute a pending payment.
   - Assert two `KEYCODE_VOLUME_UP` presses within `1,200ms` execute the action, while presses > 30s apart expire safely.
 

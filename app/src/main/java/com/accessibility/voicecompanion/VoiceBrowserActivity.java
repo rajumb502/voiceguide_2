@@ -8,6 +8,7 @@ import android.graphics.*;
 import android.net.Uri;
 import android.os.*;
 import android.util.Base64;
+import android.view.KeyEvent;
 import android.view.View;
 import android.webkit.*;
 import android.widget.*;
@@ -21,6 +22,17 @@ import java.util.Collections;
 import java.util.concurrent.*;
 
 public final class VoiceBrowserActivity extends Activity implements VoiceEngineManager.Callback {
+    public static class AndroidVoiceBridge {
+        private volatile String hostname = "";
+        @JavascriptInterface
+        public void setHostname(String hostname) {
+            this.hostname = hostname != null ? hostname : "";
+        }
+        public String getHostname() {
+            return hostname;
+        }
+    }
+
     private WebView web;
     private TextView status;
     private EditText address;
@@ -29,6 +41,7 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
     private final SharingConsent sharing = new SharingConsent();
     private final AgentSession agent = new AgentSession();
     private final Handler main = new Handler(Looper.getMainLooper());
+    private final AndroidVoiceBridge bridge = new AndroidVoiceBridge();
     private JSONObject pendingProposal, pendingSnapshot;
     private boolean agentActing, pageLoading;
     private long loadStarted;
@@ -61,6 +74,7 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
         web.getSettings().setAllowFileAccess(false); web.getSettings().setAllowContentAccess(false);
         web.getSettings().setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
         web.getSettings().setGeolocationEnabled(false);
+        web.addJavascriptInterface(bridge, "AndroidVoiceBridge");
         web.setOnTouchListener((v,event) -> {
             if (event.getAction() == android.view.MotionEvent.ACTION_DOWN && agent.running()) { cancel(); voice.speak("Task paused because you touched the page. Tap Speak to give a new instruction."); }
             return false;
@@ -101,6 +115,41 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
         voice.speak("Welcome to Voice Companion. Tap Speak and say go to followed by a website address, or say help. Choose your AI provider and API key in Settings for questions about a page.");
         if (getIntent().getData() != null) open(getIntent().getData().toString()); else open("https://example.com");
     }
+
+    @Override public boolean dispatchKeyEvent(KeyEvent event) {
+        if (event.getAction() == KeyEvent.ACTION_DOWN) {
+            int keyCode = event.getKeyCode();
+            if (keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
+                if (guard.hasPending()) {
+                    ActionSafetyGuard.Pending pending = guard.onVolumeUp(SystemClock.elapsedRealtime(), navigation);
+                    if (pending != null && pendingProposal != null) {
+                        agent.answer("Approved via hardware confirmation.");
+                        JSONObject proposal = pendingProposal, snapshot = pendingSnapshot;
+                        pendingProposal = pendingSnapshot = null;
+                        executeAgentAction(proposal, snapshot, pending.navigation(), true);
+                    }
+                    return true;
+                }
+            } else if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
+                if (guard.hasPending()) {
+                    guard.onVolumeDown(SystemClock.elapsedRealtime());
+                    cancel();
+                    voice.speak("Action cancelled.");
+                    return true;
+                }
+            }
+        }
+        return super.dispatchKeyEvent(event);
+    }
+
+    void simulateVoiceInput(String spokenText) {
+        command(spokenText);
+    }
+
+    boolean simulateKeyEvent(KeyEvent event) {
+        return dispatchKeyEvent(event);
+    }
+
     private void button(LinearLayout parent, String text, View.OnClickListener listener) {
         Button button = new Button(this); button.setText(text); button.setMinHeight(64); button.setOnClickListener(listener);
         parent.addView(button, new LinearLayout.LayoutParams(0,-2,1));
@@ -134,13 +183,16 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
     }
     @Override public void command(String text) {
         if (guard.hasPending()) {
-            var pending = guard.take(text, SystemClock.elapsedRealtime(), navigation);
-            if (pending != null && pendingProposal != null) {
-                agent.answer("Approved the proposed action.");
-                JSONObject proposal = pendingProposal, snapshot = pendingSnapshot;
-                pendingProposal = pendingSnapshot = null;
-                executeAgentAction(proposal,snapshot,pending.navigation(),true);
-            } else { cancel(); voice.speak("Action cancelled or confirmation expired. Please ask again."); }
+            ActionSafetyGuard.SpokenResult spoken = guard.evaluateSpoken(text, SystemClock.elapsedRealtime(), navigation);
+            if (spoken == ActionSafetyGuard.SpokenResult.ABORT) {
+                cancel();
+                voice.speak("Action cancelled.");
+            } else if (spoken == ActionSafetyGuard.SpokenResult.EXPIRED) {
+                cancel();
+                voice.speak("Confirmation timed out for your safety. Please repeat your request.");
+            } else {
+                voice.speak("Spoken confirmation is not accepted for sensitive actions. Double-press Volume Up to confirm, or press Volume Down to cancel.");
+            }
             return;
         }
         if (VoiceCommands.normalize(text).matches("stop|cancel|no|नहीं")) { cancel(); voice.speak("Stopped."); return; }
@@ -175,7 +227,7 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
         if (!sharing.allows(site,settings.provider(),navigation)) {
             if (!sharing.pending()) {
                 sharing.request(text,navigation,SystemClock.elapsedRealtime(),site,settings.provider());
-                voice.ask("Allow sharing page details from " + site + ", your request and task history, this site's conversation, and enabled saved preferences and screenshots with " + settings.provider() + "? Say yes to remember this site for future visits, or no. You can change this in Settings.",locale);
+                voice.ask("Allow sharing screen details on " + site + " with the AI assistant? Say Yes or No.",locale);
             }
             return;
         }
@@ -357,11 +409,14 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
                 pendingProposal = response; pendingSnapshot = snapshot;
                 guard.queue(new ActionSafetyGuard.Pending(response.getString("target_id"),snapshot.getLong("revision"),nav,SystemClock.elapsedRealtime(),response.getString("action_summary")));
                 main.postDelayed(() -> {
-                    if (guard.hasPending() && pendingProposal == response) { cancel(); voice.speak("Confirmation expired. Please ask again."); }
+                    if (guard.hasPending() && pendingProposal == response) {
+                        cancel();
+                        voice.speak("Confirmation timed out for your safety. Please repeat your request.");
+                    }
                 },ActionSafetyGuard.TIMEOUT_MS);
-                String question = "Approve " + response.getString("action_summary") + "? Say yes or no within thirty seconds.";
+                String question = "High-stakes action: " + response.getString("action_summary") + ". Double-press Volume Up to confirm, or press Volume Down to cancel. Spoken confirmation is not accepted.";
                 remember("Assistant confirmation: " + question);
-                agent.ask(); voice.ask(question,locale); return;
+                agent.ask(); voice.speak(question); return;
             }
             executeAgentAction(response,snapshot,nav,false);
         } catch (Exception e) { cancel(); voice.speak("The assistant returned an invalid action. The task stopped."); }
