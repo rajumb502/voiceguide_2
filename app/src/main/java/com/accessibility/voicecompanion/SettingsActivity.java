@@ -25,9 +25,13 @@ public final class SettingsActivity extends Activity implements VoiceEngineManag
     private AutoCompleteTextView model;
     private EditText key, language;
     private TextView keyStatus, feedback;
+    private Switch sharing, screenshots, remember, audioTones, allSites;
+    private EditText sites, notes;
+    private Spinner provider;
     private final HashMap<String,String> models = new HashMap<>(), keys = new HashMap<>();
     private final HashMap<String,String> siteDrafts = new HashMap<>();
     private final HashMap<String,Boolean> allSiteDrafts = new HashMap<>();
+
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
@@ -43,7 +47,7 @@ public final class SettingsActivity extends Activity implements VoiceEngineManag
         Button skip = new Button(this); skip.setText("Skip permission setup"); root.addView(skip);
         skip.setOnClickListener(v -> { setupRunning = false; setupAction = null; voice.speak("Permission setup skipped. You can continue from this button later."); });
         label(root, "Choose a provider and a model that supports images and structured JSON. Requests use your API account and may incur charges.");
-        label(root, "Provider"); Spinner provider = new Spinner(this);
+        label(root, "Provider"); provider = new Spinner(this);
         provider.setContentDescription("AI provider"); provider.setMinimumHeight(56);
         provider.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, new String[]{AssistantSettings.GEMINI, AssistantSettings.OPENAI})); root.addView(provider);
         TextView modelLabel = label(root, "Model ID (choose a suggestion or type your own)");
@@ -58,21 +62,25 @@ public final class SettingsActivity extends Activity implements VoiceEngineManag
         remove.setOnClickListener(v -> { settings.removeKey(current); keys.remove(current); key.setText(""); updateKeyStatus(); feedback.setText("Saved key removed."); });
         TextView languageLabel = label(root, "Speech language (for example en-IN or hi-IN)");
         language = new EditText(this); language.setId(View.generateViewId()); languageLabel.setLabelFor(language.getId()); language.setSingleLine(); language.setText(settings.locale()); root.addView(language);
-        Switch sharing = new Switch(this); sharing.setText("Allow sending page details and conversation to the selected AI provider"); sharing.setChecked(settings.sharingEnabled()); root.addView(sharing);
-        Switch screenshots = new Switch(this); screenshots.setText("Include page screenshots"); screenshots.setChecked(settings.screenshotsEnabled()); root.addView(screenshots);
+
+        audioTones = new Switch(this); audioTones.setText("Play audio earcon tones (beep, thinking pulse, chime)");
+        audioTones.setChecked(settings.audioTonesEnabled()); root.addView(audioTones);
+
+        sharing = new Switch(this); sharing.setText("Allow sending page details and conversation to the selected AI provider"); sharing.setChecked(settings.sharingEnabled()); root.addView(sharing);
+        screenshots = new Switch(this); screenshots.setText("Include page screenshots"); screenshots.setChecked(settings.screenshotsEnabled()); root.addView(screenshots);
         label(root,"Both sharing options default to Yes. Screenshots may show private text. Turn page sharing off to use only local voice commands. These settings apply to Gemini and OpenAI.");
-        Switch allSites = new Switch(this); allSites.setText("Allow all sites without asking for this provider"); root.addView(allSites);
+        allSites = new Switch(this); allSites.setText("Allow all sites without asking for this provider"); root.addView(allSites);
         label(root,"Off by default. When enabled, any site can share page details, conversation, and enabled screenshots and saved preferences with the selected provider. Turning page sharing off still blocks all uploads. Sensitive-field protection and action confirmations still apply.");
         TextView sitesLabel = label(root,"Approved sites for this provider (one hostname per line)");
-        EditText sites = new EditText(this); sites.setId(View.generateViewId()); sitesLabel.setLabelFor(sites.getId()); sites.setMinLines(2);
+        sites = new EditText(this); sites.setId(View.generateViewId()); sitesLabel.setLabelFor(sites.getId()); sites.setMinLines(2);
         sites.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
         sites.setSaveEnabled(false); sites.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO); root.addView(sites);
         label(root,"A spoken Yes remembers that exact hostname for this provider across visits and app restarts. Subdomains need their own approval. Add or remove hostnames here, then Save settings. Enter example.com, without a URL, path, port, or wildcard.");
         Button clearSites = new Button(this); clearSites.setText("Clear sharing approvals for this provider"); root.addView(clearSites);
         clearSites.setOnClickListener(v -> { sites.setText(""); allSites.setChecked(false); voice.speak("Sharing approvals cleared for this provider. Save settings to apply."); });
-        Switch remember = new Switch(this); remember.setText("Remember and use my feedback preferences"); remember.setChecked(settings.rememberPreferences()); root.addView(remember);
+        remember = new Switch(this); remember.setText("Remember and use my feedback preferences"); remember.setChecked(settings.rememberPreferences()); root.addView(remember);
         TextView notesLabel = label(root,"Saved preferences (one per line)");
-        EditText notes = new EditText(this); notes.setId(View.generateViewId()); notesLabel.setLabelFor(notes.getId()); notes.setMinLines(3);
+        notes = new EditText(this); notes.setId(View.generateViewId()); notesLabel.setLabelFor(notes.getId()); notes.setMinLines(3);
         notes.setSaveEnabled(false); notes.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO);
         notes.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE); notes.setFilters(new InputFilter[]{new InputFilter.LengthFilter(4000)}); notes.setText(settings.userPreferences()); root.addView(notes);
         label(root,"Say remember that followed by a preference, or keep answers short. Preferences are encrypted on this device and included with AI requests only when enabled and you consent for the current site. Page content is never automatically saved as a preference.");
@@ -85,7 +93,7 @@ public final class SettingsActivity extends Activity implements VoiceEngineManag
                 String secret = key.getText().toString().trim();
                 java.util.Set<String> approved = SharingConsent.sites(sites.getText().toString());
                 settings.save(current, model.getText().toString().trim(), secret, language.getText().toString().trim());
-                settings.saveGeneral(sharing.isChecked(),screenshots.isChecked(),remember.isChecked(),notes.getText().toString());
+                settings.saveGeneral(sharing.isChecked(),screenshots.isChecked(),remember.isChecked(),audioTones.isChecked(),notes.getText().toString());
                 settings.saveSharingConsent(current,allSites.isChecked(),approved);
                 Toast.makeText(this, "Settings saved", Toast.LENGTH_SHORT).show(); finish();
             } catch (IllegalArgumentException e) { feedback.setText(e.getMessage()); }
@@ -109,7 +117,9 @@ public final class SettingsActivity extends Activity implements VoiceEngineManag
             }
             @Override public void onNothingSelected(AdapterView<?> parent) { }
         });
-        voice = new VoiceEngineManager(this,this); voice.setLanguage(settings.locale());
+        voice = new VoiceEngineManager(this,this);
+        voice.setTonesEnabled(settings.audioTonesEnabled());
+        voice.setLanguage(settings.locale());
     }
     private void advanceSetup() {
         if (!setupRunning || voice == null) return;
@@ -146,9 +156,124 @@ public final class SettingsActivity extends Activity implements VoiceEngineManag
         try { action.run(); }
         catch (RuntimeException e) { voice.speak("This settings screen is unavailable. Tap Continue voice guided setup for the next step."); }
     }
-    @Override public void command(String text) { if (SharingConsent.isYes(text)) runSetupAction(); else { setupRunning = false; setupAction = null; voice.speak("Setup paused."); } }
+
+    boolean updateSettingByVoice(String text) {
+        String norm = VoiceCommands.normalize(text);
+        if (norm.matches(".*(turn on|enable|switch on)\\s+(tone|tones|sound|audio tones).*")) {
+            audioTones.setChecked(true);
+            settings.saveAudioTones(true);
+            voice.setTonesEnabled(true);
+            voice.speak("Audio tones enabled.");
+            return true;
+        }
+        if (norm.matches(".*(turn off|disable|switch off|mute)\\s+(tone|tones|sound|audio tones).*")) {
+            audioTones.setChecked(false);
+            settings.saveAudioTones(false);
+            voice.setTonesEnabled(false);
+            voice.speak("Audio tones turned off.");
+            return true;
+        }
+        if (norm.matches(".*(turn on|enable|allow)\\s+(page sharing|sharing).*")) {
+            sharing.setChecked(true);
+            settings.saveSharingEnabled(true);
+            voice.speak("Page sharing enabled.");
+            return true;
+        }
+        if (norm.matches(".*(turn off|disable|stop)\\s+(page sharing|sharing).*")) {
+            sharing.setChecked(false);
+            settings.saveSharingEnabled(false);
+            voice.speak("Page sharing turned off.");
+            return true;
+        }
+        if (norm.matches(".*(turn on|enable|include)\\s+(screenshot|screenshots).*")) {
+            screenshots.setChecked(true);
+            settings.saveScreenshotsEnabled(true);
+            voice.speak("Page screenshots enabled.");
+            return true;
+        }
+        if (norm.matches(".*(turn off|disable|stop)\\s+(screenshot|screenshots).*")) {
+            screenshots.setChecked(false);
+            settings.saveScreenshotsEnabled(false);
+            voice.speak("Page screenshots turned off.");
+            return true;
+        }
+        if (norm.matches(".*(turn on|enable)\\s+(remember preferences|remembering preferences).*")) {
+            remember.setChecked(true);
+            settings.saveRememberPreferences(true);
+            voice.speak("Remembering preferences enabled.");
+            return true;
+        }
+        if (norm.matches(".*(turn off|disable)\\s+(remember preferences|remembering preferences).*")) {
+            remember.setChecked(false);
+            settings.saveRememberPreferences(false);
+            voice.speak("Remembering preferences turned off.");
+            return true;
+        }
+        if (norm.matches(".*(set language|change language|language)\\s+(to\\s+)?(hindi|hi|hi-in).*")) {
+            language.setText("hi-IN");
+            settings.saveLocale("hi-IN");
+            voice.setLanguage("hi-IN");
+            voice.speak("Language changed to Hindi.");
+            return true;
+        }
+        if (norm.matches(".*(set language|change language|language)\\s+(to\\s+)?(english|en|en-in).*")) {
+            language.setText("en-IN");
+            settings.saveLocale("en-IN");
+            voice.setLanguage("en-IN");
+            voice.speak("Language changed to Indian English.");
+            return true;
+        }
+        if (norm.matches(".*(set provider|change provider|use)\\s+(gemini|google).*")) {
+            provider.setSelection(0);
+            settings.saveProvider(AssistantSettings.GEMINI);
+            voice.speak("AI provider set to Gemini.");
+            return true;
+        }
+        if (norm.matches(".*(set provider|change provider|use)\\s+(openai|chatgpt).*")) {
+            provider.setSelection(1);
+            settings.saveProvider(AssistantSettings.OPENAI);
+            voice.speak("AI provider set to OpenAI.");
+            return true;
+        }
+        if (norm.matches(".*(clear approvals|clear sites|clear approved sites).*")) {
+            sites.setText("");
+            allSites.setChecked(false);
+            settings.saveSharingConsent(current, false, java.util.Collections.emptySet());
+            voice.speak("Sharing approvals cleared.");
+            return true;
+        }
+        if (norm.matches(".*(save settings|save|apply).*")) {
+            try {
+                String secret = key.getText().toString().trim();
+                java.util.Set<String> approved = SharingConsent.sites(sites.getText().toString());
+                settings.save(current, model.getText().toString().trim(), secret, language.getText().toString().trim());
+                settings.saveGeneral(sharing.isChecked(),screenshots.isChecked(),remember.isChecked(),audioTones.isChecked(),notes.getText().toString());
+                settings.saveSharingConsent(current,allSites.isChecked(),approved);
+                voice.speak("Settings saved.");
+                finish();
+                return true;
+            } catch (Exception e) {
+                voice.speak("Could not save settings. " + e.getMessage());
+                return true;
+            }
+        }
+        return false;
+    }
+
+    @Override public void command(String text) {
+        if (updateSettingByVoice(text)) return;
+        if (SharingConsent.isYes(text)) runSetupAction();
+        else { setupRunning = false; setupAction = null; voice.speak("Setup paused."); }
+    }
     @Override public void feedback(String text) { feedback.setText(text); }
-    @Override protected void onResume() { super.onResume(); advanceSetup(); }
+    @Override protected void onResume() {
+        super.onResume();
+        if (settings != null && voice != null) {
+            voice.setTonesEnabled(settings.audioTonesEnabled());
+            voice.setLanguage(settings.locale());
+        }
+        advanceSetup();
+    }
     @Override protected void onPause() { if (voice != null) voice.stop(); super.onPause(); }
     @Override public void onRequestPermissionsResult(int code, String[] permissions, int[] results) {
         super.onRequestPermissionsResult(code,permissions,results);

@@ -38,6 +38,7 @@ public final class AssistantSettings {
     public boolean sharingEnabled() { return prefs.getBoolean("share_page", true); }
     public boolean screenshotsEnabled() { return prefs.getBoolean("share_screenshots", true); }
     public boolean rememberPreferences() { return prefs.getBoolean("remember_preferences", true); }
+    public boolean audioTonesEnabled() { return prefs.getBoolean("audio_tones", true); }
     public String userPreferences() { return prefs.getString("user_preferences", ""); }
     public boolean allSitesAllowed(String provider) { return prefs.getBoolean(provider + ".share_all_sites",false); }
     public Set<String> approvedSites(String provider) { return new TreeSet<>(prefs.getStringSet(provider + ".approved_sites",java.util.Collections.emptySet())); }
@@ -57,11 +58,35 @@ public final class AssistantSettings {
         saveSharingConsent(provider,allSitesAllowed(provider),sites);
     }
     public void saveGeneral(boolean share, boolean screenshots, boolean remember, String notes) {
+        saveGeneral(share, screenshots, remember, audioTonesEnabled(), notes);
+    }
+    public void saveGeneral(boolean share, boolean screenshots, boolean remember, boolean tones, String notes) {
         if (notes.length()>4000) throw new IllegalArgumentException("Preferences must be at most 4000 characters.");
         if (!prefs.edit().putBoolean("share_page",share).putBoolean("share_screenshots",screenshots)
-                .putBoolean("remember_preferences",remember).putString("user_preferences",notes.trim()).commit()) throw new IllegalStateException("Could not save preferences.");
+                .putBoolean("remember_preferences",remember).putBoolean("audio_tones", tones)
+                .putString("user_preferences",notes.trim()).commit()) throw new IllegalStateException("Could not save preferences.");
     }
-    public void saveUserPreferences(String notes) { saveGeneral(sharingEnabled(),screenshotsEnabled(),rememberPreferences(),notes); }
+    public void saveAudioTones(boolean enabled) {
+        if (!prefs.edit().putBoolean("audio_tones", enabled).commit()) throw new IllegalStateException("Could not save audio tone setting.");
+    }
+    public void saveSharingEnabled(boolean enabled) {
+        if (!prefs.edit().putBoolean("share_page", enabled).commit()) throw new IllegalStateException("Could not save sharing setting.");
+    }
+    public void saveScreenshotsEnabled(boolean enabled) {
+        if (!prefs.edit().putBoolean("share_screenshots", enabled).commit()) throw new IllegalStateException("Could not save screenshot setting.");
+    }
+    public void saveRememberPreferences(boolean enabled) {
+        if (!prefs.edit().putBoolean("remember_preferences", enabled).commit()) throw new IllegalStateException("Could not save remember preference setting.");
+    }
+    public void saveLocale(String newLocale) {
+        if (!newLocale.matches("[a-zA-Z]{2,3}(-[a-zA-Z]{2,8})*")) throw new IllegalArgumentException("Enter a language tag such as en-IN or hi-IN.");
+        if (!prefs.edit().putString("locale", newLocale).commit()) throw new IllegalStateException("Could not save language.");
+    }
+    public void saveProvider(String newProvider) {
+        if (!newProvider.equals(GEMINI) && !newProvider.equals(OPENAI)) throw new IllegalArgumentException("Invalid provider");
+        if (!prefs.edit().putString("provider", newProvider).commit()) throw new IllegalStateException("Could not save provider.");
+    }
+    public void saveUserPreferences(String notes) { saveGeneral(sharingEnabled(),screenshotsEnabled(),rememberPreferences(),audioTonesEnabled(),notes); }
     public String apiKey(String provider) throws Exception {
         String encoded = prefs.getString(provider + ".key", "");
         if (encoded.isEmpty()) return "";

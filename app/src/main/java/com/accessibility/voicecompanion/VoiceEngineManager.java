@@ -33,6 +33,9 @@ public final class VoiceEngineManager implements RecognitionListener {
     private boolean listening, answeringQuestion;
     private int automaticRetries;
     private String answerLocale;
+    private Runnable thinkingRunnable;
+    private boolean tonesEnabled = true;
+
     public VoiceEngineManager(Context context, Callback callback) {
         this.callback = callback;
         this.context = context.getApplicationContext();
@@ -65,6 +68,78 @@ public final class VoiceEngineManager implements RecognitionListener {
             @Override public void onError(String id) { main.post(() -> { if (id.equals(Long.toString(utterance))) afterSpeech = null; }); }
         });
     }
+
+    public void setTonesEnabled(boolean enabled) {
+        this.tonesEnabled = enabled;
+        if (!enabled) stopThinkingPulse();
+    }
+
+    public boolean tonesEnabled() {
+        return tonesEnabled;
+    }
+
+    public void playEarcon(int toneType, int durationMs) {
+        if (!tonesEnabled) return;
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            main.post(() -> playEarcon(toneType, durationMs));
+            return;
+        }
+        try {
+            ToneGenerator tone = new ToneGenerator(AudioManager.STREAM_MUSIC, 65);
+            tone.startTone(toneType, durationMs);
+            main.postDelayed(tone::release, durationMs + 80);
+        } catch (RuntimeException ignored) {}
+    }
+
+    public void startThinkingPulse() {
+        if (!tonesEnabled) return;
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            main.post(this::startThinkingPulse);
+            return;
+        }
+        stopThinkingPulse();
+        thinkingRunnable = new Runnable() {
+            @Override public void run() {
+                if (destroyed || !tonesEnabled) return;
+                playEarcon(ToneGenerator.TONE_PROP_PROMPT, 60);
+                main.postDelayed(this, 1200);
+            }
+        };
+        main.post(thinkingRunnable);
+    }
+
+    public void stopThinkingPulse() {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            main.post(this::stopThinkingPulse);
+            return;
+        }
+        if (thinkingRunnable != null) {
+            main.removeCallbacks(thinkingRunnable);
+            thinkingRunnable = null;
+        }
+    }
+
+    public void playSuccessChime() {
+        if (!tonesEnabled) return;
+        stopThinkingPulse();
+        playEarcon(ToneGenerator.TONE_PROP_ACK, 120);
+    }
+
+    public void playErrorTone() {
+        if (!tonesEnabled) return;
+        stopThinkingPulse();
+        playEarcon(ToneGenerator.TONE_PROP_NACK, 250);
+    }
+
+    public boolean isSpeaking() {
+        return tts != null && tts.isSpeaking();
+    }
+
+    public void interruptAndListen(String locale) {
+        stop();
+        listen(locale);
+    }
+
     private void requestAudioFocus() {
         try {
             if (audioManager == null) audioManager = (AudioManager) context.getSystemService(Context.AUDIO_SERVICE);
@@ -100,6 +175,7 @@ public final class VoiceEngineManager implements RecognitionListener {
     public void listen(String locale) {
         if (Looper.myLooper() != Looper.getMainLooper()) { main.post(() -> listen(locale)); return; }
         if (destroyed) return;
+        stopThinkingPulse();
         afterSpeech = null; queued = null; utterance++;
         if (recognizer == null) { callback.feedback("Speech recognition is unavailable on this device."); return; }
         tts.stop();
@@ -120,6 +196,7 @@ public final class VoiceEngineManager implements RecognitionListener {
             } catch (RuntimeException e) {
                 listening = false;
                 abandonAudioFocus();
+                playErrorTone();
                 speak("Could not start the microphone. Check microphone permission and speech recognition settings.");
             }
         }, 150);
@@ -160,6 +237,7 @@ public final class VoiceEngineManager implements RecognitionListener {
     public void stop() {
         if (Looper.myLooper() != Looper.getMainLooper()) { main.post(this::stop); return; }
         if (destroyed) return;
+        stopThinkingPulse();
         answeringQuestion = false; listening = false; afterSpeech = null; utterance++; queued = null;
         abandonAudioFocus();
         if (recognizer != null) recognizer.cancel(); if (tts != null) tts.stop();
@@ -193,11 +271,13 @@ public final class VoiceEngineManager implements RecognitionListener {
                     listen(answerLocale); return;
                 }
             } catch (RuntimeException e) { Log.w("VoiceEngineManager","Could not start system speech recognition."); }
+            playErrorTone();
             speak("Offline speech is unavailable for this language, and system speech recognition could not start. Check Android speech recognition settings."); return;
         }
         if (error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT) {
             retryQuestionOrSpeak(answeringQuestion ? "I did not hear clearly. Tap Speak, wait for the tone, then say your answer. The question is still pending until it expires." : "I did not hear clearly. Tap Speak, wait for the tone, then say your command."); return;
         }
+        playErrorTone();
         String message;
         switch (error) {
             case SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS: message = "Microphone access is missing. Tap Speak to grant permission."; break;
@@ -220,11 +300,7 @@ public final class VoiceEngineManager implements RecognitionListener {
     @Override public void onReadyForSpeech(Bundle b) {
         if (destroyed || !listening) return;
         callback.feedback("Listening. Say your command now.");
-        try {
-            ToneGenerator tone = new ToneGenerator(AudioManager.STREAM_MUSIC, 70);
-            tone.startTone(ToneGenerator.TONE_PROP_BEEP, 100);
-            main.postDelayed(tone::release, 200);
-        } catch (RuntimeException ignored) { }
+        playEarcon(ToneGenerator.TONE_PROP_BEEP, 100);
     }
     @Override public void onBeginningOfSpeech() {}
     @Override public void onRmsChanged(float value) {}

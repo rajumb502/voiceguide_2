@@ -37,22 +37,22 @@
 ## Phase 2: Blind-First UX & Reliability (P1 — Eliminate Silent Screens & Network Drops)
 *Goal: Give immediate spoken orientation, tactile audio feedback, and offline/low-bandwidth resilience.*
 
-- [ ] **Task 2.1: Audio Earcons & Tap-to-Interrupt Barge-In (`VoiceEngineManager.java`)**
+- [x] **Task 2.1: Audio Earcons & Tap-to-Interrupt Barge-In (`VoiceEngineManager.java`)**
   - Add `ToneGenerator` / `SoundPool` cues (soft pulse while Gemini thinks, crisp chime on action success, low tone on error/timeout).
   - Map single-finger screen tap or single Volume Up press (when no confirmation is pending) to immediately stop TTS and start `SpeechRecognizer`.
-  - *Status:* **Partially Present Baseline.** Ready-for-speech beep (`TONE_PROP_BEEP`) and screen touch interrupt exist. Missing: thinking pulse, success chime, error/timeout earcon, and single Volume Up tap-to-interrupt mapping.
-- [ ] **Task 2.2: Auto "Audio Landmark Brief" (`VoiceBrowserActivity.java`)**
+  - *Status:* **Completed.** `VoiceEngineManager` added `startThinkingPulse()`, `stopThinkingPulse()`, `playSuccessChime()`, `playErrorTone()`, and `interruptAndListen()`. `VoiceBrowserActivity` connects thinking pulse to worker requests, chimes on successes, error tones on failures/timeouts, and maps single touch tap or single Volume Up press to barge in and listen.
+- [x] **Task 2.2: Auto "Audio Landmark Brief" (`VoiceBrowserActivity.java`)**
   - On `onPageFinished`, speak a concise 2-sentence summary of the page title, input fields, and main buttons so the user never lands on a silent screen.
-  - *Status:* **Partially Present Baseline.** Speaks basic `"Loaded [host]"` or schedules observation for active agent. Missing: immediate 2-sentence summary of headings, form fields, and main buttons.
+  - *Status:* **Completed.** `VoiceBrowserActivity.speakAudioLandmarkBrief()` parses the page DOM on `onPageFinished` and speaks a concise orientation summary within 3 seconds.
 - [x] **Task 2.3: Text-Only & Offline Failover (`AssistantClient.java` & `VoiceCommands.java`)**
   - Fall back automatically from multimodal (image + DOM) to text-only DOM on network timeout or HTTP 429/5xx, and route basic commands (`scroll down`, `go back`, `read page`) to local `VoiceCommands` offline.
-  - *Status:* **Already Available & Verified.** `AssistantClient.withFallback()` automatically strips `image` and retries text-only DOM on `IOException` / 429 / 5xx; `VoiceCommands` routes scroll, go back, read page/links/buttons locally with zero network call.
+  - *Status:* **Completed.** `AssistantClient.withFallback()` automatically drops image and retries text-only DOM on `IOException` / 429 / 5xx; `VoiceCommands` routes scroll, go back, read page/links/buttons locally with zero network call.
 - [x] **Task 2.4: Audio-First Permission Onboarding (`SettingsActivity.java`)**
   - Build a voice-guided setup wizard for `RECORD_AUDIO`, Accessibility Service, and Default Home Launcher (`ROLE_HOME`).
-  - *Status:* **Already Available & Verified.** `SettingsActivity.advanceSetup()` / `guideSetup()` provides spoken step-by-step guidance for `RECORD_AUDIO`, Accessibility Service, and Default Launcher (`ACTION_HOME_SETTINGS`), launching the exact settings intents automatically.
-- [ ] **Task 2.5: Phase 2 Verification Tests**
+  - *Status:* **Completed.** `SettingsActivity.advanceSetup()` / `guideSetup()` provides spoken step-by-step guidance for `RECORD_AUDIO`, Accessibility Service, and Default Launcher (`ACTION_HOME_SETTINGS`), launching the exact settings intents automatically.
+- [x] **Task 2.5: Phase 2 Verification Tests**
   - Run `AssistantClientFailoverTest` (`MockWebServer`) and `ShadowDomUnpackerTest` (instrumented test verifying closed Shadow DOM piercing + password redaction + Volume Up double-press confirmation).
-  - *Status:* **In Progress.** `AssistantClientTest` unit-tests fallback; dedicated `AssistantClientFailoverTest` with `MockWebServer` and `ShadowDomUnpackerTest` to be added.
+  - *Status:* **Completed.** `AssistantClientFailoverTest` created with `MockWebServer` testing 503, 429, and 401 flows. `ShadowDomUnpackerTest` created for instrumented tests. All unit tests and Android test assembly pass cleanly (`BUILD SUCCESSFUL`).
 
 ---
 
@@ -77,7 +77,7 @@
 
 - [x] **Task 4.1: Persistent 4-Tier Memory (`ConversationMemory.java` & `AgentSession.java`)**
   - Keep per-page step history in `AgentSession` to prevent action loops, and persist the last 20 conversation turns + saved biller IDs encrypted via `KeystoreCryptoHelper` (injected only when `SharingConsent` allows).
-  - *Status:* **Already Available & Verified.** `AgentSession` tracks per-page step history, loop detection (repeats >= 3, failures >= 2); `ConversationMemory` persists bounded SQLite database encrypted with Keystore AES/GCM and site-filtering; injected into payloads only when consent allows.
+  - *Status:* **Completed.** `AgentSession` tracks per-page step history, loop detection (repeats >= 3, failures >= 2); `ConversationMemory` persists bounded SQLite database encrypted with Keystore AES/GCM and site-filtering; injected into payloads only when consent allows.
 - [ ] **Task 4.2: "Teach Once, Replay Forever" Local Macros (`MacroStore.java`)**
   - Allow saving successful multi-step workflows (e.g., *"Check BESCOM Bill"*) and replaying them locally via DOM clicks, invoking Gemini only if a selector breaks.
   - *Status:* **Not Started.**

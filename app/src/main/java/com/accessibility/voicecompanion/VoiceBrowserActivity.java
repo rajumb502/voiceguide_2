@@ -76,7 +76,16 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
         web.getSettings().setGeolocationEnabled(false);
         web.addJavascriptInterface(bridge, "AndroidVoiceBridge");
         web.setOnTouchListener((v,event) -> {
-            if (event.getAction() == android.view.MotionEvent.ACTION_DOWN && agent.running()) { cancel(); voice.speak("Task paused because you touched the page. Tap Speak to give a new instruction."); }
+            if (event.getAction() == android.view.MotionEvent.ACTION_DOWN) {
+                if (voice != null && voice.isSpeaking()) {
+                    voice.interruptAndListen(locale);
+                    return true;
+                }
+                if (agent.running()) {
+                    cancel();
+                    voice.speak("Task paused because you touched the page. Tap Speak to give a new instruction.");
+                }
+            }
             return false;
         });
         web.setWebChromeClient(new WebChromeClient() {
@@ -95,10 +104,10 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
                 else cancel();
             }
             @Override public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
-                if (request.isForMainFrame()) { pageFailed = true; cancel(); if (active) voice.speak("This website could not load. Tap Speak and say go back or open another website."); }
+                if (request.isForMainFrame()) { pageFailed = true; cancel(); if (active) { voice.playErrorTone(); voice.speak("This website could not load. Tap Speak and say go back or open another website."); } }
             }
             @Override public void onReceivedHttpError(WebView view, WebResourceRequest request, WebResourceResponse response) {
-                if (request.isForMainFrame()) { pageFailed = true; cancel(); if (active) voice.speak("The website returned an error. Tap Speak and say go back or try another website."); }
+                if (request.isForMainFrame()) { pageFailed = true; cancel(); if (active) { voice.playErrorTone(); voice.speak("The website returned an error. Tap Speak and say go back or try another website."); } }
             }
             @Override public void onPageFinished(WebView view, String url) {
                 pageLoading = false;
@@ -107,13 +116,44 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
                 remember("Page loaded: " + (view.getTitle() == null ? Uri.parse(url).getHost() : view.getTitle()));
                 if (active && !pageFailed) {
                     if (agent.running()) scheduleObservation(900);
-                    else voice.speak("Loaded " + Uri.parse(url).getHost() + ". Tap Speak and tell me what you want to do, or say help.");
+                    else speakAudioLandmarkBrief(view, url);
                 }
             }
         });
         voice = new VoiceEngineManager(this, this);
+        voice.setTonesEnabled(settings.audioTonesEnabled());
         voice.speak("Welcome to Voice Companion. Tap Speak and say go to followed by a website address, or say help. Choose your AI provider and API key in Settings for questions about a page.");
         if (getIntent().getData() != null) open(getIntent().getData().toString()); else open("https://example.com");
+    }
+
+    private void speakAudioLandmarkBrief(WebView view, String url) {
+        final long briefNav = navigation;
+        web.evaluateJavascript("window.__vc ? window.__vc.snapshot() : null", raw -> {
+            if (!active || briefNav != navigation || pageFailed) return;
+            String host = Uri.parse(url).getHost();
+            String pageTitle = view.getTitle() == null || view.getTitle().trim().isEmpty() ? host : view.getTitle().trim();
+            try {
+                if (raw != null) {
+                    Object decoded = new JSONTokener(raw).nextValue();
+                    if (decoded instanceof String) {
+                        JSONObject snap = new JSONObject((String) decoded);
+                        JSONArray nodes = snap.optJSONArray("nodes");
+                        int inputs = 0, buttons = 0;
+                        if (nodes != null) {
+                            for (int i = 0; i < nodes.length(); i++) {
+                                JSONObject n = nodes.getJSONObject(i);
+                                if (n.optBoolean("editable")) inputs++;
+                                else if (n.optBoolean("clickable")) buttons++;
+                            }
+                        }
+                        String brief = pageTitle + " loaded. Found " + inputs + " input fields and " + buttons + " interactive controls. Tap Speak and tell me what you want to do.";
+                        voice.speak(brief);
+                        return;
+                    }
+                }
+            } catch (Exception ignored) {}
+            voice.speak("Loaded " + host + ". Tap Speak and tell me what you want to do, or say help.");
+        });
     }
 
     @Override public boolean dispatchKeyEvent(KeyEvent event) {
@@ -123,17 +163,22 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
                 if (guard.hasPending()) {
                     ActionSafetyGuard.Pending pending = guard.onVolumeUp(SystemClock.elapsedRealtime(), navigation);
                     if (pending != null && pendingProposal != null) {
+                        voice.playSuccessChime();
                         agent.answer("Approved via hardware confirmation.");
                         JSONObject proposal = pendingProposal, snapshot = pendingSnapshot;
                         pendingProposal = pendingSnapshot = null;
                         executeAgentAction(proposal, snapshot, pending.navigation(), true);
                     }
                     return true;
+                } else if (voice != null && voice.isSpeaking()) {
+                    voice.interruptAndListen(locale);
+                    return true;
                 }
             } else if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
                 if (guard.hasPending()) {
                     guard.onVolumeDown(SystemClock.elapsedRealtime());
                     cancel();
+                    voice.playErrorTone();
                     voice.speak("Action cancelled.");
                     return true;
                 }
@@ -178,6 +223,7 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
     @Override public void feedback(String text) { status.setText(text); }
     private void cancel() {
         sharing.revoke();
+        if (voice != null) voice.stopThinkingPulse();
         requestId++; busy = false; agentActing = false; agent.stop(); guard.clear(); pendingProposal = pendingSnapshot = null;
         if (continuation != null) main.removeCallbacks(continuation);
     }
@@ -186,9 +232,11 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
             ActionSafetyGuard.SpokenResult spoken = guard.evaluateSpoken(text, SystemClock.elapsedRealtime(), navigation);
             if (spoken == ActionSafetyGuard.SpokenResult.ABORT) {
                 cancel();
+                voice.playErrorTone();
                 voice.speak("Action cancelled.");
             } else if (spoken == ActionSafetyGuard.SpokenResult.EXPIRED) {
                 cancel();
+                voice.playErrorTone();
                 voice.speak("Confirmation timed out for your safety. Please repeat your request.");
             } else {
                 voice.speak("Spoken confirmation is not accepted for sensitive actions. Double-press Volume Up to confirm, or press Volume Down to cancel.");
@@ -238,14 +286,15 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
         catch (Exception e) { cancel(); voice.speak("Could not read your API key. Open Settings and enter it again."); return; }
         if (apiKey.isEmpty()) { cancel(); voice.speak("Set your " + provider + " API key in Settings first."); return; }
         busy = true; final long job = ++requestId, nav = navigation;
+        voice.startThinkingPulse();
         if (agent.steps() == 1) voice.speak("I will work on that. You can tap Speak to interrupt me, or Stop to cancel.");
         web.evaluateJavascript("window.__vc ? window.__vc.snapshot() : null", raw -> {
             try {
-                if (!valid(job, nav)) return;
+                if (!valid(job, nav)) { voice.stopThinkingPulse(); return; }
                 Object decoded = new JSONTokener(raw).nextValue();
                 if (!(decoded instanceof String)) throw new JSONException("No page snapshot");
                 JSONObject snapshot = new JSONObject((String) decoded);
-                if (!sharing.allows(snapshot.getString("site"),provider,nav)) { cancel(); voice.speak("The page changed. Please ask again."); return; }
+                if (!sharing.allows(snapshot.getString("site"),provider,nav)) { voice.stopThinkingPulse(); cancel(); voice.speak("The page changed. Please ask again."); return; }
                 JSONObject payload = new JSONObject().put("command", text).put("snapshot", snapshot).put("conversation_history", conversation.snapshot(snapshot.getString("site"))).put("current_page",ConversationMemory.page(web.getUrl(),web.getTitle(),navigation)).put("task_history",new JSONArray(agent.history()));
                 if (settings.rememberPreferences()) payload.put("user_preferences","Preferred language: " + settings.locale() + "\n" + settings.userPreferences());
                 Bitmap captured = null;
@@ -268,14 +317,94 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
                             } finally { bitmap.recycle(); }
                         }
                         JSONObject response = AssistantClient.request(provider, model, apiKey, payload,sharing,nav,settings);
-                        runOnUiThread(() -> { if (valid(job, nav)) { busy = false; apply(response, snapshot, nav); } });
-                    } catch (Exception e) { runOnUiThread(() -> { if (valid(job,nav)) { cancel(); voice.speak(e instanceof AssistantClient.RequestFailure ? e.getMessage() : "The assistant could not connect. You can still say scroll down, go back, read this page, or open app followed by an app name."); } }); }
+                        runOnUiThread(() -> {
+                            voice.stopThinkingPulse();
+                            if (valid(job, nav)) { busy = false; apply(response, snapshot, nav); }
+                        });
+                    } catch (Exception e) {
+                        runOnUiThread(() -> {
+                            voice.stopThinkingPulse();
+                            voice.playErrorTone();
+                            if (valid(job,nav)) { cancel(); voice.speak(e instanceof AssistantClient.RequestFailure ? e.getMessage() : "The assistant could not connect. You can still say scroll down, go back, read this page, or open app followed by an app name."); }
+                        });
+                    }
                 });
-            } catch (Exception e) { cancel(); voice.speak("Could not inspect this page. Try reloading it."); }
+            } catch (Exception e) {
+                voice.stopThinkingPulse();
+                voice.playErrorTone();
+                cancel();
+                voice.speak("Could not inspect this page. Try reloading it.");
+            }
         });
     }
     private boolean preferenceCommand(String text) {
         String normalized = VoiceCommands.normalize(text);
+        if (normalized.matches(".*(turn on|enable|switch on)\\s+(tone|tones|sound|audio tones).*")) {
+            settings.saveAudioTones(true);
+            voice.setTonesEnabled(true);
+            voice.speak("Audio tones enabled.");
+            return true;
+        }
+        if (normalized.matches(".*(turn off|disable|switch off|mute)\\s+(tone|tones|sound|audio tones).*")) {
+            settings.saveAudioTones(false);
+            voice.setTonesEnabled(false);
+            voice.speak("Audio tones turned off.");
+            return true;
+        }
+        if (normalized.matches(".*(turn on|enable|allow)\\s+(page sharing|sharing).*")) {
+            settings.saveSharingEnabled(true);
+            voice.speak("Page sharing enabled.");
+            return true;
+        }
+        if (normalized.matches(".*(turn off|disable|stop)\\s+(page sharing|sharing).*")) {
+            settings.saveSharingEnabled(false);
+            voice.speak("Page sharing turned off.");
+            return true;
+        }
+        if (normalized.matches(".*(turn on|enable|include)\\s+(screenshot|screenshots).*")) {
+            settings.saveScreenshotsEnabled(true);
+            voice.speak("Page screenshots enabled.");
+            return true;
+        }
+        if (normalized.matches(".*(turn off|disable|stop)\\s+(screenshot|screenshots).*")) {
+            settings.saveScreenshotsEnabled(false);
+            voice.speak("Page screenshots turned off.");
+            return true;
+        }
+        if (normalized.matches(".*(turn on|enable)\\s+(remember preferences|remembering preferences).*")) {
+            settings.saveRememberPreferences(true);
+            voice.speak("Remembering preferences enabled.");
+            return true;
+        }
+        if (normalized.matches(".*(turn off|disable)\\s+(remember preferences|remembering preferences).*")) {
+            settings.saveRememberPreferences(false);
+            voice.speak("Remembering preferences turned off.");
+            return true;
+        }
+        if (normalized.matches(".*(set language|change language|language)\\s+(to\\s+)?(hindi|hi|hi-in).*")) {
+            settings.saveLocale("hi-IN");
+            locale = "hi-IN";
+            voice.setLanguage("hi-IN");
+            voice.speak("Language changed to Hindi.");
+            return true;
+        }
+        if (normalized.matches(".*(set language|change language|language)\\s+(to\\s+)?(english|en|en-in).*")) {
+            settings.saveLocale("en-IN");
+            locale = "en-IN";
+            voice.setLanguage("en-IN");
+            voice.speak("Language changed to Indian English.");
+            return true;
+        }
+        if (normalized.matches(".*(set provider|change provider|use)\\s+(gemini|google).*")) {
+            settings.saveProvider(AssistantSettings.GEMINI);
+            voice.speak("AI provider set to Gemini.");
+            return true;
+        }
+        if (normMatches(normalized, "(set provider|change provider|use)\\s+(openai|chatgpt)")) {
+            settings.saveProvider(AssistantSettings.OPENAI);
+            voice.speak("AI provider set to OpenAI.");
+            return true;
+        }
         if (normalized.matches("forget my preferences|clear my preferences")) {
             try { settings.saveUserPreferences(""); voice.speak("Saved preferences cleared."); }
             catch (Exception e) { voice.speak("I could not clear the saved preferences. Please try again in Settings."); }
@@ -292,6 +421,10 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
             voice.speak("I will remember: " + update.text() + ". You can review or change this in Settings.");
         } catch (Exception e) { voice.speak("I could not save that preference. Please try again in Settings."); }
         return true;
+    }
+
+    private static boolean normMatches(String text, String regex) {
+        return java.util.regex.Pattern.compile(".*" + regex + ".*").matcher(text).matches();
     }
     private boolean localCommand(String text) {
         String command = VoiceCommands.normalize(text);
@@ -397,7 +530,13 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
         if (!agent.running()) return;
         try {
             String action = response.getString("action"), speech = response.getString("spoken_feedback");
-            if (action.equals("SPEAK") || action.equals("DONE")) { remember("Assistant: " + speech); agent.stop(); voice.speak(speech); return; }
+            if (action.equals("SPEAK") || action.equals("DONE")) {
+                voice.playSuccessChime();
+                remember("Assistant: " + speech);
+                agent.stop();
+                voice.speak(speech);
+                return;
+            }
             if (action.equals("ASK")) { agent.ask(); remember("Assistant question: " + speech); voice.ask(speech,locale); return; }
             if (action.equals("NAVIGATE") && !AgentPolicy.navigationAllowed(agent.userInstructions(),response.getString("url"),snapshot)) {
                 remember("Assistant: I could not verify that destination from the current page. I will inspect the page again.");
@@ -411,6 +550,7 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
                 main.postDelayed(() -> {
                     if (guard.hasPending() && pendingProposal == response) {
                         cancel();
+                        voice.playErrorTone();
                         voice.speak("Confirmation timed out for your safety. Please repeat your request.");
                     }
                 },ActionSafetyGuard.TIMEOUT_MS);
@@ -419,7 +559,7 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
                 agent.ask(); voice.speak(question); return;
             }
             executeAgentAction(response,snapshot,nav,false);
-        } catch (Exception e) { cancel(); voice.speak("The assistant returned an invalid action. The task stopped."); }
+        } catch (Exception e) { cancel(); voice.playErrorTone(); voice.speak("The assistant returned an invalid action. The task stopped."); }
     }
     private void executeAgentAction(JSONObject action, JSONObject snapshot, long nav, boolean approved) {
         if (!active || !agent.running() || navigation != nav) { cancel(); voice.speak("The page changed. Please repeat your request."); return; }
@@ -441,15 +581,17 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
             final long actionTicket = requestId;
             web.evaluateJavascript("window.__vc && window.__vc.perform(" + action.toString() + "," + snapshot.getLong("revision") + "," + approved + ")", result -> {
                 if (!active || !agent.running() || requestId != actionTicket || navigation != nav) return;
-                recordOutcome(action,"true".equals(result) ? "Local operation dispatched. Verify the resulting page before reporting success." : "Target changed, was blocked, or operation failed. Inspect again and choose another approach.","true".equals(result));
+                boolean success = "true".equals(result);
+                if (success) voice.playSuccessChime();
+                recordOutcome(action,success ? "Local operation dispatched. Verify the resulting page before reporting success." : "Target changed, was blocked, or operation failed. Inspect again and choose another approach.",success);
                 scheduleObservation(1000);
             });
-        } catch (Exception e) { cancel(); voice.speak("The browser could not perform that operation. The task stopped."); }
+        } catch (Exception e) { cancel(); voice.playErrorTone(); voice.speak("The browser could not perform that operation. The task stopped."); }
     }
     private void recordOutcome(JSONObject action, String outcome, boolean success) {
         busy = false;
         boolean proceed = agent.record(action.optString("action") + " " + action.optString("target_id") + " " + action.optString("direction") + " " + action.optString("url"),action.optString("action_summary") + ". " + outcome,success);
-        if (!proceed) { requestId++; agentActing = false; voice.speak("I could not make reliable progress, so I stopped. Tap Speak to change the request or try another approach."); }
+        if (!proceed) { requestId++; agentActing = false; voice.playErrorTone(); voice.speak("I could not make reliable progress, so I stopped. Tap Speak to change the request or try another approach."); }
     }
     private void remember(String text) {
         String role = text.startsWith("User") ? "user" : text.startsWith("Page loaded:") ? "page" : "assistant";
@@ -460,7 +602,17 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
         cancel(); voice.stop();
         startActivity(new Intent(this, SettingsActivity.class));
     }
-    @Override protected void onResume() { super.onResume(); active = true; if (settings != null) { locale = settings.locale(); if (voice != null) voice.setLanguage(locale); } }
+    @Override protected void onResume() {
+        super.onResume();
+        active = true;
+        if (settings != null) {
+            locale = settings.locale();
+            if (voice != null) {
+                voice.setLanguage(locale);
+                voice.setTonesEnabled(settings.audioTonesEnabled());
+            }
+        }
+    }
     @Override protected void onPause() { active = false;
         cancel(); if (voice != null) voice.stop(); super.onPause(); }
     @Override protected void onDestroy() {

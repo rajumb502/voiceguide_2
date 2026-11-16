@@ -89,4 +89,14 @@ public class VoiceEngineManagerTest {
         assertSame(recognizer,ShadowSpeechRecognizer.getLatestSpeechRecognizer());
         assertTrue(feedback.get(feedback.size()-1).contains("did not hear clearly"));
     }
+    @Test public void tonesCanBeToggledOnAndOff() {
+        assertTrue(voice.tonesEnabled());
+        voice.setTonesEnabled(false);
+        assertFalse(voice.tonesEnabled());
+        voice.playSuccessChime();
+        voice.playErrorTone();
+        voice.startThinkingPulse();
+        voice.setTonesEnabled(true);
+        assertTrue(voice.tonesEnabled());
+    }
 }
