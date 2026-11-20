@@ -420,6 +420,7 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
         sharing.revoke();
         if (voice != null) voice.stopThinkingPulse();
         requestId++; busy = false; agentActing = false; agent.stop(); guard.clear(); pendingProposal = pendingSnapshot = null;
+        if (!active) BackgroundVoiceService.setKeyEventListener(null);
         pendingOtpCode = null;
         if (continuation != null) main.removeCallbacks(continuation);
     }
@@ -1141,6 +1142,7 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
     @Override protected void onResume() {
         super.onResume();
         active = true;
+        BackgroundVoiceService.setKeyEventListener(this::dispatchKeyEvent);
         if (settings != null) {
             locale = settings.locale();
             if (voice != null) {
@@ -1158,6 +1160,9 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
         }
     }
     @Override protected void onPause() {
+        if (!guard.hasPending()) {
+            BackgroundVoiceService.setKeyEventListener(null);
+        }
         active = false;
         replayingMacro = false;
         activeReplayMacro = null;
@@ -1168,6 +1173,7 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
         super.onPause();
     }
     @Override protected void onDestroy() {
+        BackgroundVoiceService.setKeyEventListener(null);
         main.removeCallbacksAndMessages(null);
         if (smsOtpHelper != null) smsOtpHelper.stopListening();
         if (voice != null) voice.destroy();

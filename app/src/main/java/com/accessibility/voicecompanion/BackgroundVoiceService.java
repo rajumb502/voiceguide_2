@@ -1,16 +1,55 @@
 package com.accessibility.voicecompanion;
 
 import android.accessibilityservice.AccessibilityService;
+import android.accessibilityservice.AccessibilityServiceInfo;
 import android.os.Build;
+import android.view.KeyEvent;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
 import java.util.List;
 
 /**
  * Accessibility service for assisting visually impaired users with system dialogs
- * such as auto-approving Google Play Services SMS User Consent prompts.
+ * such as auto-approving Google Play Services SMS User Consent prompts, and global
+ * key event filtering for hardware ActionSafetyGuard confirmations.
  */
 public class BackgroundVoiceService extends AccessibilityService {
+
+    public interface KeyEventListener {
+        boolean onGlobalKeyEvent(KeyEvent event);
+    }
+
+    private static volatile KeyEventListener activeKeyEventListener;
+
+    public static void setKeyEventListener(KeyEventListener listener) {
+        activeKeyEventListener = listener;
+    }
+
+    public static KeyEventListener getKeyEventListener() {
+        return activeKeyEventListener;
+    }
+
+    @Override
+    protected void onServiceConnected() {
+        super.onServiceConnected();
+        AccessibilityServiceInfo info = getServiceInfo();
+        if (info == null) {
+            info = new AccessibilityServiceInfo();
+        }
+        info.flags |= AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS;
+        info.flags |= AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS;
+        setServiceInfo(info);
+    }
+
+    @Override
+    public boolean onKeyEvent(KeyEvent event) {
+        if (event == null) return false;
+        KeyEventListener listener = activeKeyEventListener;
+        if (listener != null) {
+            return listener.onGlobalKeyEvent(event);
+        }
+        return super.onKeyEvent(event);
+    }
 
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {

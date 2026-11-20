@@ -9,10 +9,11 @@
   - Allow consented screenshots when a tagged payment `<iframe>` is present on page while keeping main-document passwords and raw card inputs redacted/suppressed.
   - Ensure `window.scrollY` / `window.scrollX` stability between snapshot capture and `dispatchCoordinateTap()`.
   - *Status:* **Completed.** `page.js` tags `payment_frame` and keeps `sensitive` false for iframes unless actual password/PIN fields exist in main document; `AssistantClient.java` retains `payment_frame` iframe nodes in clean snapshot and sends screenshots for visual coordinate detection; `VoiceBrowserActivity.java` tracks scroll deltas to prevent tap misalignments across zoom/soft-keyboard popups. Verified in `AssistantClientTest.java`.
-- [ ] **Task 5.3: Migrate Global Volume Key Interception to `AccessibilityService.onKeyEvent()` (`BackgroundVoiceService.java` & `res/xml/accessibility_service_config.xml`)**
+- [x] **Task 5.3: Migrate Global Volume Key Interception to `AccessibilityService.onKeyEvent()` (`BackgroundVoiceService.java` & `res/xml/accessibility_service_config.xml`)**
   - Add `android:canRequestFilterKeyEvents="true"` to `accessibility_service_config.xml` and request key filtering flag.
   - Route volume key events via `BackgroundVoiceService` to `ActionSafetyGuard` so hardware confirmation works even if an external system dialog or payment bottom-sheet overlays the activity.
   - Filter `repeatCount == 0` to preserve TalkBack's dual-volume 3-second hold shortcut.
+  - *Status:* **Completed.** Added `canRequestFilterKeyEvents="true"` and `flagRequestFilterKeyEvents` to `accessibility_service_config.xml`. Configured `FLAG_REQUEST_FILTER_KEY_EVENTS` dynamically in `BackgroundVoiceService.onServiceConnected()`. Implemented `onKeyEvent()` global delegation via `KeyEventListener` routing to `VoiceBrowserActivity.dispatchKeyEvent()` with `repeatCount == 0` filtering and volume-stream suppression. Verified in `BackgroundVoiceServiceTest.java`.
 
 ### P1 — High-Priority Indian UX & Hardware Reality Fixes
 - [ ] **Task 5.4: Guide Users Past Android 13+ "Restricted Settings" During Onboarding (`SettingsActivity.java`)**
