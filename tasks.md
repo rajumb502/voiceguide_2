@@ -40,7 +40,7 @@
 - [x] **Task 2.1: Audio Earcons & Tap-to-Interrupt Barge-In (`VoiceEngineManager.java`)**
   - Add `ToneGenerator` / `SoundPool` cues (soft pulse while Gemini thinks, crisp chime on action success, low tone on error/timeout).
   - Map single-finger screen tap or single Volume Up press (when no confirmation is pending) to immediately stop TTS and start `SpeechRecognizer`.
-  - *Status:* **Completed.** `VoiceEngineManager` added `startThinkingPulse()`, `stopThinkingPulse()`, `playSuccessChime()`, `playErrorTone()`, and `interruptAndListen()`. `VoiceBrowserActivity` connects thinking pulse to worker requests, chimes on successes, error tones on failures/timeouts, and maps single touch tap or single Volume Up press to barge in and listen.
+  - *Status:* **Completed.** `VoiceEngineManager` added `startThinkingPulse()`, `stopThinkingPulse()`, `playSuccessChime()`, `playErrorTone()`, and `interruptAndListen()`. `VoiceBrowserActivity` connects thinking pulse to worker requests, chimes on successes, error tones on failures/timeouts, and maps single touch tap or single Volume Up press to barge in and listen. Added option to mute tones in settings for cognitively impaired users, and full voice command control over all settings.
 - [x] **Task 2.2: Auto "Audio Landmark Brief" (`VoiceBrowserActivity.java`)**
   - On `onPageFinished`, speak a concise 2-sentence summary of the page title, input fields, and main buttons so the user never lands on a silent screen.
   - *Status:* **Completed.** `VoiceBrowserActivity.speakAudioLandmarkBrief()` parses the page DOM on `onPageFinished` and speaks a concise orientation summary within 3 seconds.
@@ -59,16 +59,16 @@
 ## Phase 3: Indian Web Realities (P2 — Solves Banking, Utility & Language Friction)
 *Goal: Handle payment gateways, SMS OTPs, and regional Indian languages seamlessly.*
 
-- [ ] **Task 3.1: Cross-Origin `<iframe>` & Payment Gateway Support (`VoiceBrowserActivity.java`)**
+- [x] **Task 3.1: Cross-Origin `<iframe>` & Payment Gateway Support (`VoiceBrowserActivity.java`)**
   - Switch script injection to `WebViewCompat.addDocumentStartJavaScript`.
   - Add DPI-scaled `MotionEvent` coordinate tap fallback when cross-origin `<iframe>` gateways (Razorpay, BillDesk, Aadhaar e-KYC) block `element.click()`.
-  - *Status:* **Partially Present Baseline.** `WebViewCompat.addDocumentStartJavaScript` is already active in `VoiceBrowserActivity`. Missing: DPI-scaled `MotionEvent` coordinate click fallback for cross-origin iframes.
-- [ ] **Task 3.2: Hands-Free SMS OTP Auto-Read (`SmsOtpHelper.java`)**
+  - *Status:* **Completed.** Added iframe inclusion to `snapshot()` nodes with bounding boxes (`x, y, width, height`), tagging payment iframes as clickable. Added `window.__vc.enterOtp(code)`. Implemented DPI-scaled `MotionEvent` coordinate hardware tap fallback (`dispatchCoordinateTap(cssX, cssY)`) when DOM click fails or is blocked across cross-origin iframe boundaries.
+- [x] **Task 3.2: Hands-Free SMS OTP Auto-Read (`SmsOtpHelper.java`)**
   - Integrate Android's **SMS User Consent API** (zero `READ_SMS` permission needed) to detect incoming OTPs, read them aloud, and fill/submit upon **physical Volume Up double-press** (preventing bystander OTP spoofing).
-  - *Status:* **Not Started.**
-- [ ] **Task 3.3: Regional Languages & Code-Mixed Voice (`VoiceEngineManager.java` & `UserPreferences.java`)**
+  - *Status:* **Completed.** Integrated SMS User Consent API (`SmsOtpHelper.java`), zero `READ_SMS` permission. Added robust regex matching for Indian OTP formats (SBI, HDFC, BESCOM, etc.), digit formatting for TTS, and wired into `ActionSafetyGuard` enforcing strict double Volume Up hardware confirmation (rejecting voice).
+- [x] **Task 3.3: Regional Languages & Code-Mixed Voice (`VoiceEngineManager.java` & `UserPreferences.java`)**
   - Add language selection (`en-IN`, `hi-IN`, `kn-IN`, `ta-IN`, `mr-IN`) in `SettingsActivity` and pass locale context to both `SpeechRecognizer` and Gemini prompts.
-  - *Status:* **Partially Present Baseline.** Locale (`en-IN`, `hi-IN`, etc.) is supported in `SettingsActivity` and passed to `SpeechRecognizer` & TTS; system prompt code-mixed language guidance and dedicated spinner choices to be finalized.
+  - *Status:* **Completed.** Added language presets (`en-IN`, `hi-IN`, `kn-IN`, `ta-IN`, `mr-IN`, `te-IN`, `bn-IN`) in `SettingsActivity` with voice commands, updated `AssistantClient` system prompt with Indian code-mixed vocabulary (Hinglish/Kanglish/Tanglish), and passed active locale into Gemini request payloads.
 
 ---
 
@@ -78,6 +78,6 @@
 - [x] **Task 4.1: Persistent 4-Tier Memory (`ConversationMemory.java` & `AgentSession.java`)**
   - Keep per-page step history in `AgentSession` to prevent action loops, and persist the last 20 conversation turns + saved biller IDs encrypted via `KeystoreCryptoHelper` (injected only when `SharingConsent` allows).
   - *Status:* **Completed.** `AgentSession` tracks per-page step history, loop detection (repeats >= 3, failures >= 2); `ConversationMemory` persists bounded SQLite database encrypted with Keystore AES/GCM and site-filtering; injected into payloads only when consent allows.
-- [ ] **Task 4.2: "Teach Once, Replay Forever" Local Macros (`MacroStore.java`)**
-  - Allow saving successful multi-step workflows (e.g., *"Check BESCOM Bill"*) and replaying them locally via DOM clicks, invoking Gemini only if a selector breaks.
-  - *Status:* **Not Started.**
+- [x] **Task 4.2: \"Teach Once, Replay Forever\" Local Macros (`MacroStore.java`)**
+  - Allow saving successful multi-step workflows (e.g., *\"Check BESCOM Bill\"*) and replaying them locally via DOM clicks, invoking Gemini only if a selector breaks.
+  - *Status:* **Completed.** Implemented `MacroStore.java` with Keystore encryption, step sequencing (`CLICK`, `TYPE`, `NAVIGATE`, `SCROLL`, `SUBMIT`), and voice command matching. Extended `page.js` with `executeMacroStep()` and automated selector generation. Integrated into `VoiceBrowserActivity.java` with voice-guided recording upon task completion ("save macro as [name]"), instant deterministic local replay ("run macro [name]"), macro management ("list macros", "delete macro [name]"), and automatic smooth fallback to Gemini if an expected element is missing or page structure changes. Verified with `MacroStoreTest.java` and `MacroReplayTest.java`.

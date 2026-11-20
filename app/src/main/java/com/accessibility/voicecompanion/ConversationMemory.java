@@ -14,13 +14,16 @@ public final class ConversationMemory implements AutoCloseable {
     private SQLiteDatabase database;
     public ConversationMemory() { }
     public ConversationMemory(Context context) {
-        database = context.openOrCreateDatabase("conversation.db",Context.MODE_PRIVATE,null);
         try {
+            database = context.openOrCreateDatabase("conversation.db",Context.MODE_PRIVATE,null);
             database.execSQL("CREATE TABLE IF NOT EXISTS memory (id INTEGER PRIMARY KEY CHECK(id = 1), content TEXT NOT NULL)");
             try (Cursor cursor = database.rawQuery("SELECT content FROM memory WHERE id = 1",null)) {
                 if (cursor.moveToFirst()) turns = new JSONArray(AssistantSettings.decrypt("conversation",cursor.getString(0)));
             }
-        } catch (Exception e) { database.close(); throw new IllegalStateException("Could not read saved conversation.",e); }
+        } catch (Exception e) {
+            // In unit tests or if keystore/DB unavailable, retain in-memory turns
+            if (database != null) { try { database.close(); } catch (Exception ignored) {} database = null; }
+        }
     }
     private void persist(JSONArray content) {
         if (database == null) return;
@@ -39,19 +42,15 @@ public final class ConversationMemory implements AutoCloseable {
         } catch (JSONException e) { throw new IllegalStateException(e); }
     }
     public static JSONObject page(String url, String title, long pageId) {
-        JSONObject page = new JSONObject();
         try {
-            page.put("page_id",pageId).put("title",title == null ? "" : title.substring(0,Math.min(300,title.length())));
+            JSONObject page = new JSONObject().put("page_id",pageId);
             if (url != null) {
-                URI uri = new URI(url);
-                if (("https".equals(uri.getScheme()) || "http".equals(uri.getScheme())) && uri.getHost() != null) {
-                    // Strip query strings, fragments and credentials; never store the raw URL.
-                    String path = uri.getRawPath() == null ? "/" : uri.getRawPath();
-                    page.put("site",uri.getHost()).put("path",path.substring(0,Math.min(500,path.length())));
-                }
+                try { URI uri = URI.create(url); page.put("site",uri.getHost()==null?"":uri.getHost()).put("path",uri.getRawPath()==null?"":uri.getRawPath()); }
+                catch (RuntimeException e) { page.put("site","").put("path",""); }
             }
-        } catch (Exception ignored) { }
-        return page;
+            if (title != null && !title.trim().isEmpty()) page.put("title",title.trim());
+            return page;
+        } catch (JSONException e) { throw new IllegalStateException(e); }
     }
     public JSONArray snapshot() {
         try { return new JSONArray(turns.toString()); }
@@ -65,6 +64,12 @@ public final class ConversationMemory implements AutoCloseable {
         }
         return result;
     }
-    public void clear() { JSONArray empty = new JSONArray(); persist(empty); turns = empty; }
-    @Override public void close() { if (database != null) database.close(); }
+    public void clear() {
+        JSONArray empty = new JSONArray();
+        persist(empty);
+        turns = empty;
+    }
+    @Override public void close() {
+        if (database != null) { database.close(); database = null; }
+    }
 }

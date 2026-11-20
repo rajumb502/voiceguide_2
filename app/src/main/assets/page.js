@@ -73,6 +73,29 @@
     const r = el.getBoundingClientRect(), s = getComputedStyle(el);
     return r.width > 0 && r.height > 0 && r.top < innerHeight && r.left < innerWidth && r.bottom > 0 && r.right > 0 && s.visibility === 'visible' && s.display !== 'none';
   }
+  function computeSelector(el) {
+    try {
+      if (el.id && /^[A-Za-z][A-Za-z0-9_-]*$/.test(el.id)) {
+        return '#' + el.id;
+      }
+      const tag = (el.tagName || '').toLowerCase();
+      const name = el.getAttribute ? el.getAttribute('name') : null;
+      if (name) return tag + '[name="' + name + '"]';
+      const type = el.getAttribute ? el.getAttribute('type') : null;
+      if (type && ['submit', 'button', 'search', 'email', 'tel', 'number', 'text'].includes(type)) {
+        const ariaLabel = el.getAttribute ? el.getAttribute('aria-label') : null;
+        if (ariaLabel) return tag + '[type="' + type + '"][aria-label="' + ariaLabel + '"]';
+        return tag + '[type="' + type + '"]';
+      }
+      const ariaLabel = el.getAttribute ? el.getAttribute('aria-label') : null;
+      if (ariaLabel) return tag + '[aria-label="' + ariaLabel + '"]';
+      const placeholder = el.getAttribute ? el.getAttribute('placeholder') : null;
+      if (placeholder) return tag + '[placeholder="' + placeholder + '"]';
+      return tag;
+    } catch (e) {
+      return '';
+    }
+  }
   function snapshot() {
     targets = new Map(); const nodes = []; let sensitive = false;
     notifyBridge();
@@ -82,7 +105,7 @@
         if (el.tagName === 'IFRAME' || el.isContentEditable) sensitive = true;
         if (el.matches('input,textarea,select') && sensitiveField(el)) sensitive = true;
         if (el.shadowRoot) walk(el.shadowRoot);
-        if (!visible(el) || !el.matches('a,button,input,select,textarea,[role=button],[role=link],h1,h2,h3,p,label')) continue;
+        if (!visible(el) || !el.matches('a,button,input,select,textarea,[role=button],[role=link],h1,h2,h3,p,label,iframe')) continue;
         if (!ids.has(el)) ids.set(el, String(++nextId));
         const id = ids.get(el), r = el.getBoundingClientRect();
         const privateField = el.matches('input,textarea,select');
@@ -90,7 +113,8 @@
         if (el.isContentEditable) continue;
         const node = {
           id,
-          label: isSensitive ? '[REDACTED]' : label(el),
+          selector: computeSelector(el),
+          label: isSensitive ? '[REDACTED]' : (label(el) || (el.tagName === 'IFRAME' ? (el.title || el.id || 'Payment frame') : '')),
           tag: el.tagName,
           role: el.getAttribute('role') || '',
           type: el.getAttribute('type') || '',
@@ -99,7 +123,7 @@
           autocomplete: el.getAttribute('autocomplete') || '',
           href: el.tagName === 'A' ? el.href || '' : '',
           download: el.hasAttribute ? el.hasAttribute('download') : false,
-          clickable: !isSensitive && el.matches('a,button,[role=button],[role=link]'),
+          clickable: !isSensitive && el.matches('a,button,[role=button],[role=link],iframe'),
           search: !isSensitive && isSearch(el),
           search_form: !isSensitive && searchForm(el),
           sensitive: isSensitive,
@@ -130,6 +154,104 @@
     if (!hit || !(hit === t.el || t.el.contains(hit))) return false;
     t.el.click(); return true;
   }
+  function enterOtp(code) {
+    if (!code) return false;
+    let target = null;
+    for (const [id, t] of targets.entries()) {
+      const el = t.el;
+      if (!el.isConnected || !visible(el) || el.disabled || el.readOnly) continue;
+      if (el.matches('input') && (/otp|one.?time|code|verification|passcode/i.test(label(el) + ' ' + el.name + ' ' + el.id + ' ' + (el.autocomplete||'')) || el.type === 'password' || el.type === 'number' || el.type === 'tel' || el.type === 'text')) {
+        if (/otp|one.?time|code|verification|passcode/i.test(label(el) + ' ' + el.name + ' ' + el.id + ' ' + (el.autocomplete||''))) {
+          target = el;
+          break;
+        }
+        if (!target && (el.type === 'password' || el.autocomplete === 'one-time-code')) {
+          target = el;
+        }
+      }
+    }
+    if (!target) {
+      const active = document.activeElement;
+      if (active && active.matches('input') && !active.disabled && !active.readOnly) {
+        target = active;
+      }
+    }
+    if (!target) {
+      for (const el of document.querySelectorAll('input:not([type=hidden])')) {
+        if (!visible(el) || el.disabled || el.readOnly) continue;
+        if (/otp|one.?time|code|verification|passcode/i.test([el.name, el.id, el.placeholder, el.getAttribute('autocomplete'), label(el)].join(' '))) {
+          target = el;
+          break;
+        }
+      }
+    }
+    if (!target) return false;
+    const proto = target.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+    if (!setter) return false;
+    target.focus();
+    setter.call(target, code);
+    target.dispatchEvent(new Event('input', {bubbles: true}));
+    target.dispatchEvent(new Event('change', {bubbles: true}));
+    return target.value === code;
+  }
+  function executeMacroStep(step) {
+    if (!step) return false;
+    const action = step.action;
+    function findTarget(s) {
+      if (s.selector && typeof document.querySelector === 'function') {
+        try {
+          const el = document.querySelector(s.selector);
+          if (el && visible(el) && !el.disabled && el.getAttribute?.('aria-disabled') !== 'true') return el;
+        } catch (e) {}
+      }
+      function searchIn(root) {
+        if (!root || typeof root.querySelectorAll !== 'function') return null;
+        for (const el of root.querySelectorAll('*')) {
+          if (!visible(el) || el.disabled || el.getAttribute?.('aria-disabled') === 'true') continue;
+          if (s.tag && el.tagName && el.tagName.toUpperCase() !== s.tag.toUpperCase()) continue;
+          if (s.label && label(el).toLowerCase() === s.label.toLowerCase()) return el;
+          if (s.name && el.getAttribute?.('name') === s.name) return el;
+          if (s.placeholder && el.getAttribute?.('placeholder') === s.placeholder) return el;
+          if (el.shadowRoot) {
+            const nested = searchIn(el.shadowRoot);
+            if (nested) return nested;
+          }
+        }
+        return null;
+      }
+      return searchIn(document);
+    }
+
+    if (action === 'CLICK') {
+      const el = findTarget(step);
+      if (!el) return false;
+      if (typeof el.scrollIntoView === 'function') el.scrollIntoView({block: 'center'});
+      if (typeof el.click === 'function') el.click();
+      return true;
+    }
+    if (action === 'TYPE') {
+      const el = findTarget(step);
+      if (!el || !el.matches?.('input,textarea')) return false;
+      const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+      const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+      if (!setter) return false;
+      if (typeof el.focus === 'function') el.focus();
+      setter.call(el, step.text || '');
+      if (typeof el.dispatchEvent === 'function') {
+        el.dispatchEvent(new Event('input', {bubbles: true}));
+        el.dispatchEvent(new Event('change', {bubbles: true}));
+      }
+      return el.value === (step.text || '');
+    }
+    if (action === 'SUBMIT') {
+      const el = findTarget(step);
+      if (!el || !el.form || typeof el.form.requestSubmit !== 'function') return false;
+      el.form.requestSubmit();
+      return true;
+    }
+    return false;
+  }
   function perform(action, expectedRevision, strict) {
     if (action.action === 'CLICK') return click(action.target_id, expectedRevision, strict);
     const t = targets.get(action.target_id);
@@ -157,5 +279,5 @@
     }
     return false;
   }
-  window.__vc = {snapshot, click, findSearch, perform};
+  window.__vc = {snapshot, click, findSearch, perform, enterOtp, executeMacroStep};
 })();

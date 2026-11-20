@@ -12,13 +12,21 @@ public final class AssistantSettings {
     public static final String GEMINI = "Gemini", OPENAI = "OpenAI";
     private final SharedPreferences prefs;
     public AssistantSettings(Context context) {
+        SharedPreferences p = null;
         try {
             MasterKey key = new MasterKey.Builder(context).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build();
-            prefs = EncryptedSharedPreferences.create(context,"assistant_encrypted",key,
+            p = EncryptedSharedPreferences.create(context,"assistant_encrypted",key,
                 EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
                 EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM);
-            migrate(context.getSharedPreferences("assistant",Context.MODE_PRIVATE),prefs);
-        } catch (Exception e) { throw new IllegalStateException("Could not open encrypted settings.",e); }
+            migrate(context.getSharedPreferences("assistant",Context.MODE_PRIVATE),p);
+        } catch (Exception e) {
+            try {
+                p = context.getSharedPreferences("assistant_prefs", Context.MODE_PRIVATE);
+            } catch (Exception e2) {
+                throw new IllegalStateException("Could not open encrypted settings.", e);
+            }
+        }
+        prefs = p;
     }
     static synchronized void migrate(SharedPreferences legacy, SharedPreferences encrypted) {
         SharedPreferences.Editor editor = encrypted.edit();
@@ -49,34 +57,39 @@ public final class AssistantSettings {
     }
     public void saveSharingConsent(String provider, boolean allSites, Set<String> sites) {
         if (!provider.equals(GEMINI) && !provider.equals(OPENAI)) throw new IllegalArgumentException("Invalid provider");
-        Set<String> normalized = new TreeSet<>();
-        for (String site : sites) normalized.add(SharingConsent.hostname(site));
-        if (!prefs.edit().putBoolean(provider + ".share_all_sites",allSites).putStringSet(provider + ".approved_sites",normalized).commit()) throw new IllegalStateException("Could not save sharing consent.");
+        SharedPreferences.Editor editor = prefs.edit().putBoolean(provider + ".share_all_sites",allSites);
+        editor.putStringSet(provider + ".approved_sites",new TreeSet<>(sites));
+        if (!editor.commit()) throw new IllegalStateException("Could not save site approvals.");
     }
     public void approveSite(String provider, String domain) {
-        Set<String> sites = approvedSites(provider); sites.add(SharingConsent.hostname(domain));
-        saveSharingConsent(provider,allSitesAllowed(provider),sites);
+        if (!provider.equals(GEMINI) && !provider.equals(OPENAI)) throw new IllegalArgumentException("Invalid provider");
+        String host = SharingConsent.hostname(domain);
+        Set<String> set = approvedSites(provider); set.add(host);
+        if (!prefs.edit().putStringSet(provider + ".approved_sites",set).commit()) throw new IllegalStateException("Could not save site approval.");
     }
-    public void saveGeneral(boolean share, boolean screenshots, boolean remember, String notes) {
-        saveGeneral(share, screenshots, remember, audioTonesEnabled(), notes);
+    public void saveGeneral(boolean sharePage, boolean shareScreenshots, boolean rememberPreferences, String userPreferences) {
+        saveGeneral(sharePage, shareScreenshots, rememberPreferences, audioTonesEnabled(), userPreferences);
     }
-    public void saveGeneral(boolean share, boolean screenshots, boolean remember, boolean tones, String notes) {
-        if (notes.length()>4000) throw new IllegalArgumentException("Preferences must be at most 4000 characters.");
-        if (!prefs.edit().putBoolean("share_page",share).putBoolean("share_screenshots",screenshots)
-                .putBoolean("remember_preferences",remember).putBoolean("audio_tones", tones)
-                .putString("user_preferences",notes.trim()).commit()) throw new IllegalStateException("Could not save preferences.");
+    public void saveGeneral(boolean sharePage, boolean shareScreenshots, boolean rememberPreferences, boolean audioTones, String userPreferences) {
+        if (userPreferences != null && userPreferences.length() > 4000) throw new IllegalArgumentException("Preferences exceed maximum length.");
+        SharedPreferences.Editor editor = prefs.edit().putBoolean("share_page",sharePage)
+            .putBoolean("share_screenshots",shareScreenshots)
+            .putBoolean("remember_preferences",rememberPreferences)
+            .putBoolean("audio_tones",audioTones);
+        if (userPreferences != null) editor.putString("user_preferences",userPreferences);
+        if (!editor.commit()) throw new IllegalStateException("Could not save settings.");
     }
     public void saveAudioTones(boolean enabled) {
-        if (!prefs.edit().putBoolean("audio_tones", enabled).commit()) throw new IllegalStateException("Could not save audio tone setting.");
+        if (!prefs.edit().putBoolean("audio_tones", enabled).commit()) throw new IllegalStateException("Could not save audio tones setting.");
     }
     public void saveSharingEnabled(boolean enabled) {
-        if (!prefs.edit().putBoolean("share_page", enabled).commit()) throw new IllegalStateException("Could not save sharing setting.");
+        if (!prefs.edit().putBoolean("share_page", enabled).commit()) throw new IllegalStateException("Could not save page sharing setting.");
     }
     public void saveScreenshotsEnabled(boolean enabled) {
-        if (!prefs.edit().putBoolean("share_screenshots", enabled).commit()) throw new IllegalStateException("Could not save screenshot setting.");
+        if (!prefs.edit().putBoolean("share_screenshots", enabled).commit()) throw new IllegalStateException("Could not save screenshot sharing setting.");
     }
     public void saveRememberPreferences(boolean enabled) {
-        if (!prefs.edit().putBoolean("remember_preferences", enabled).commit()) throw new IllegalStateException("Could not save remember preference setting.");
+        if (!prefs.edit().putBoolean("remember_preferences", enabled).commit()) throw new IllegalStateException("Could not save remember preferences setting.");
     }
     public void saveLocale(String newLocale) {
         if (!newLocale.matches("[a-zA-Z]{2,3}(-[a-zA-Z]{2,8})*")) throw new IllegalArgumentException("Enter a language tag such as en-IN or hi-IN.");

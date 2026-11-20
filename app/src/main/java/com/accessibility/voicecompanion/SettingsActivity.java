@@ -1,29 +1,31 @@
 package com.accessibility.voicecompanion;
 
 import android.app.Activity;
-import android.Manifest;
 import android.content.Intent;
-import android.content.ComponentName;
-import android.content.pm.PackageManager;
-import android.provider.Settings;
-import android.accessibilityservice.AccessibilityServiceInfo;
-import android.view.accessibility.AccessibilityManager;
+import android.os.Build;
 import android.os.Bundle;
-import android.text.InputType;
+import android.provider.Settings;
 import android.text.InputFilter;
-import android.view.*;
+import android.text.InputType;
+import android.view.View;
+import android.view.WindowManager;
 import android.widget.*;
 import java.util.HashMap;
 
-public final class SettingsActivity extends Activity implements VoiceEngineManager.Callback {
+/** Clean, accessible settings UI with Keystore-backed encryption. */
+public class SettingsActivity extends Activity implements VoiceEngineManager.Callback {
+    public static final String[] INDIAN_LANGUAGES = new String[]{
+        "en-IN", "hi-IN", "kn-IN", "ta-IN", "mr-IN", "te-IN", "bn-IN"
+    };
+
     private VoiceEngineManager voice;
     private int setupAttempted;
     private boolean setupRunning = true;
     private Runnable setupAction;
     private AssistantSettings settings;
     private String current;
-    private AutoCompleteTextView model;
-    private EditText key, language;
+    private AutoCompleteTextView model, language;
+    private EditText key;
     private TextView keyStatus, feedback;
     private Switch sharing, screenshots, remember, audioTones, allSites;
     private EditText sites, notes;
@@ -56,12 +58,17 @@ public final class SettingsActivity extends Activity implements VoiceEngineManag
         model.setOnClickListener(v -> model.showDropDown());
         TextView keyLabel = label(root, "API key"); key = new EditText(this); key.setId(View.generateViewId()); keyLabel.setLabelFor(key.getId());
         key.setSingleLine(); key.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
-        key.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO); key.setSaveEnabled(false); root.addView(key);
+        if (Build.VERSION.SDK_INT >= 26) key.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO);
+        key.setSaveEnabled(false); root.addView(key);
         keyStatus = label(root, "");
         Button remove = new Button(this); remove.setText("Remove saved key for this provider"); root.addView(remove);
         remove.setOnClickListener(v -> { settings.removeKey(current); keys.remove(current); key.setText(""); updateKeyStatus(); feedback.setText("Saved key removed."); });
-        TextView languageLabel = label(root, "Speech language (for example en-IN or hi-IN)");
-        language = new EditText(this); language.setId(View.generateViewId()); languageLabel.setLabelFor(language.getId()); language.setSingleLine(); language.setText(settings.locale()); root.addView(language);
+        TextView languageLabel = label(root, "Speech language (for example en-IN, hi-IN, kn-IN, ta-IN, mr-IN)");
+        language = new AutoCompleteTextView(this); language.setId(View.generateViewId()); languageLabel.setLabelFor(language.getId());
+        language.setSingleLine(); language.setText(settings.locale());
+        language.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_dropdown_item_1line, INDIAN_LANGUAGES));
+        language.setOnClickListener(v -> language.showDropDown());
+        root.addView(language);
 
         audioTones = new Switch(this); audioTones.setText("Play audio earcon tones (beep, thinking pulse, chime)");
         audioTones.setChecked(settings.audioTonesEnabled()); root.addView(audioTones);
@@ -74,14 +81,17 @@ public final class SettingsActivity extends Activity implements VoiceEngineManag
         TextView sitesLabel = label(root,"Approved sites for this provider (one hostname per line)");
         sites = new EditText(this); sites.setId(View.generateViewId()); sitesLabel.setLabelFor(sites.getId()); sites.setMinLines(2);
         sites.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
-        sites.setSaveEnabled(false); sites.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO); root.addView(sites);
+        sites.setSaveEnabled(false);
+        if (Build.VERSION.SDK_INT >= 26) sites.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO);
+        root.addView(sites);
         label(root,"A spoken Yes remembers that exact hostname for this provider across visits and app restarts. Subdomains need their own approval. Add or remove hostnames here, then Save settings. Enter example.com, without a URL, path, port, or wildcard.");
         Button clearSites = new Button(this); clearSites.setText("Clear sharing approvals for this provider"); root.addView(clearSites);
         clearSites.setOnClickListener(v -> { sites.setText(""); allSites.setChecked(false); voice.speak("Sharing approvals cleared for this provider. Save settings to apply."); });
         remember = new Switch(this); remember.setText("Remember and use my feedback preferences"); remember.setChecked(settings.rememberPreferences()); root.addView(remember);
         TextView notesLabel = label(root,"Saved preferences (one per line)");
         notes = new EditText(this); notes.setId(View.generateViewId()); notesLabel.setLabelFor(notes.getId()); notes.setMinLines(3);
-        notes.setSaveEnabled(false); notes.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO);
+        notes.setSaveEnabled(false);
+        if (Build.VERSION.SDK_INT >= 26) notes.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO);
         notes.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE); notes.setFilters(new InputFilter[]{new InputFilter.LengthFilter(4000)}); notes.setText(settings.userPreferences()); root.addView(notes);
         label(root,"Say remember that followed by a preference, or keep answers short. Preferences are encrypted on this device and included with AI requests only when enabled and you consent for the current site. Page content is never automatically saved as a preference.");
         Button clearPreferences = new Button(this); clearPreferences.setText("Clear saved preferences"); clearPreferences.setOnClickListener(v -> notes.setText("")); root.addView(clearPreferences);
@@ -120,41 +130,97 @@ public final class SettingsActivity extends Activity implements VoiceEngineManag
         voice = new VoiceEngineManager(this,this);
         voice.setTonesEnabled(settings.audioTonesEnabled());
         voice.setLanguage(settings.locale());
+        audioTones.setOnCheckedChangeListener((btn, isChecked) -> {
+            settings.saveAudioTones(isChecked);
+            voice.setTonesEnabled(isChecked);
+        });
+        if (state == null) guideSetup();
     }
+
+    private void runSetupAction() {
+        Runnable a = setupAction; setupAction = null;
+        if (a != null) a.run();
+    }
+
+    private void guideSetup() {
+        if (!setupRunning) return;
+        voice.guide("Welcome to Voice Companion setup. Say start setup to configure required permissions, or skip setup to configure later.", () -> voice.listen(settings.locale()));
+    }
+
     private void advanceSetup() {
-        if (!setupRunning || voice == null) return;
-        setupAction = null;
-        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED && (setupAttempted & 1) == 0) {
-            guideSetup(1,"First, allow microphone access for voice commands. Android will ask for permission. Choose while using the app.",
-                () -> requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO},7)); return;
+        if (!setupRunning) return;
+        if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            setupAction = () -> requestPermissions(new String[]{android.Manifest.permission.RECORD_AUDIO}, 100);
+            voice.guide("Step 1. Microphone permission is needed so you can speak to the assistant. Say allow to open the permission dialog.", () -> voice.listen(settings.locale()));
+            return;
         }
-        AccessibilityManager manager = (AccessibilityManager)getSystemService(ACCESSIBILITY_SERVICE);
-        boolean enabled = false;
-        ComponentName service = new ComponentName(this,BackgroundVoiceService.class);
-        for (AccessibilityServiceInfo info : manager.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK)) {
-            if (service.equals(ComponentName.unflattenFromString(info.getId()))) enabled = true;
+        if (!isAccessibilityServiceEnabled()) {
+            setupAction = () -> startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));
+            voice.guide("Step 2. Accessibility Service is recommended for screen interaction. Say enable to open Android accessibility settings.", () -> voice.listen(settings.locale()));
+            return;
         }
-        if (!enabled && (setupAttempted & 2) == 0) {
-            guideSetup(2,"Next is optional accessibility setup. Browser voice commands work without it, and native app control is not available yet. In Accessibility settings, choose downloaded apps, then Voice Companion. Return here when finished.",
-                () -> startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))); return;
-        }
-        android.content.pm.ResolveInfo home = getPackageManager().resolveActivity(new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME),PackageManager.MATCH_DEFAULT_ONLY);
-        if ((home == null || !getPackageName().equals(home.activityInfo.packageName)) && (setupAttempted & 4) == 0) {
-            guideSetup(4,"Finally, optional home app setup. Choose Voice Companion to open this voice browser when you press Home. You can keep your current launcher. Return here when finished.",
-                () -> startActivity(new Intent(Settings.ACTION_HOME_SETTINGS))); return;
+        if (!isDefaultHome()) {
+            setupAction = () -> startActivity(new Intent(Settings.ACTION_HOME_SETTINGS));
+            voice.guide("Step 3. You can set Voice Companion as your default home assistant. Say enable to open home app settings.", () -> voice.listen(settings.locale()));
+            return;
         }
         setupRunning = false;
-        voice.speak("Setup steps finished. You can review your choices with Continue voice guided setup. Provider and privacy settings are below.");
+        voice.speak("All core permissions are configured. You can now adjust your AI provider or language settings, or say save settings to finish.");
     }
-    private void guideSetup(int step, String instruction, Runnable action) {
-        setupAction = () -> { setupAttempted |= step; action.run(); };
-        voice.guide(instruction + " You can also tap Continue voice guided setup.",this::runSetupAction);
+
+    private boolean isAccessibilityServiceEnabled() {
+        try {
+            int enabled = Settings.Secure.getInt(getContentResolver(), Settings.Secure.ACCESSIBILITY_ENABLED);
+            if (enabled == 1) {
+                String services = Settings.Secure.getString(getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+                return services != null && services.contains(getPackageName());
+            }
+        } catch (Exception ignored) {}
+        return false;
     }
-    private void runSetupAction() {
-        Runnable action = setupAction; setupAction = null;
-        if (action == null) return;
-        try { action.run(); }
-        catch (RuntimeException e) { voice.speak("This settings screen is unavailable. Tap Continue voice guided setup for the next step."); }
+
+    private boolean isDefaultHome() {
+        android.content.IntentFilter filter = new android.content.IntentFilter(Intent.ACTION_MAIN);
+        filter.addCategory(Intent.CATEGORY_HOME);
+        java.util.List<android.content.IntentFilter> filters = new java.util.ArrayList<>();
+        java.util.List<android.content.ComponentName> activities = new java.util.ArrayList<>();
+        getPackageManager().getPreferredActivities(filters, activities, null);
+        for (android.content.ComponentName name : activities) {
+            if (getPackageName().equals(name.getPackageName())) return true;
+        }
+        return false;
+    }
+
+    @Override public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == 100) {
+            if (grantResults.length > 0 && grantResults[0] == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                voice.speak("Microphone permission granted.");
+            } else {
+                voice.speak("Microphone permission was not granted.");
+            }
+            advanceSetup();
+        }
+    }
+
+    @Override public void command(String text) {
+        String norm = VoiceCommands.normalize(text);
+        if (norm.matches("skip|skip setup|stop")) {
+            setupRunning = false; setupAction = null;
+            voice.speak("Setup skipped.");
+            return;
+        }
+        if (norm.matches("start setup|begin setup|setup")) {
+            setupRunning = true; setupAttempted = 0;
+            advanceSetup();
+            return;
+        }
+        if (setupRunning && setupAction != null && norm.matches("allow|enable|open|yes|haan|proceed|continue")) {
+            runSetupAction();
+            return;
+        }
+        if (updateSettingByVoice(text)) return;
+        voice.speak("Command not recognized. Say start setup, skip setup, or a setting command like turn off tones.");
     }
 
     boolean updateSettingByVoice(String text) {
@@ -223,6 +289,41 @@ public final class SettingsActivity extends Activity implements VoiceEngineManag
             voice.speak("Language changed to Indian English.");
             return true;
         }
+        if (norm.matches(".*(set language|change language|language)\\s+(to\\s+)?(kannada|kn|kn-in).*")) {
+            language.setText("kn-IN");
+            settings.saveLocale("kn-IN");
+            voice.setLanguage("kn-IN");
+            voice.speak("Language changed to Kannada.");
+            return true;
+        }
+        if (norm.matches(".*(set language|change language|language)\\s+(to\\s+)?(tamil|ta|ta-in).*")) {
+            language.setText("ta-IN");
+            settings.saveLocale("ta-IN");
+            voice.setLanguage("ta-IN");
+            voice.speak("Language changed to Tamil.");
+            return true;
+        }
+        if (norm.matches(".*(set language|change language|language)\\s+(to\\s+)?(marathi|mr|mr-in).*")) {
+            language.setText("mr-IN");
+            settings.saveLocale("mr-IN");
+            voice.setLanguage("mr-IN");
+            voice.speak("Language changed to Marathi.");
+            return true;
+        }
+        if (norm.matches(".*(set language|change language|language)\\s+(to\\s+)?(telugu|te|te-in).*")) {
+            language.setText("te-IN");
+            settings.saveLocale("te-IN");
+            voice.setLanguage("te-IN");
+            voice.speak("Language changed to Telugu.");
+            return true;
+        }
+        if (norm.matches(".*(set language|change language|language)\\s+(to\\s+)?(bengali|bangla|bn|bn-in).*")) {
+            language.setText("bn-IN");
+            settings.saveLocale("bn-IN");
+            voice.setLanguage("bn-IN");
+            voice.speak("Language changed to Bengali.");
+            return true;
+        }
         if (norm.matches(".*(set provider|change provider|use)\\s+(gemini|google).*")) {
             provider.setSelection(0);
             settings.saveProvider(AssistantSettings.GEMINI);
@@ -260,30 +361,32 @@ public final class SettingsActivity extends Activity implements VoiceEngineManag
         return false;
     }
 
-    @Override public void command(String text) {
-        if (updateSettingByVoice(text)) return;
-        if (SharingConsent.isYes(text)) runSetupAction();
-        else { setupRunning = false; setupAction = null; voice.speak("Setup paused."); }
+    @Override public void feedback(String text) {
+        feedback.setText(text);
     }
-    @Override public void feedback(String text) { feedback.setText(text); }
+
+    private void updateKeyStatus() {
+        try {
+            boolean has = !settings.apiKey(current).isEmpty();
+            keyStatus.setText(has ? "A key is saved for " + current + ". Type a new key to replace it." : "No key is saved for " + current + ".");
+        } catch (Exception e) { keyStatus.setText("Could not read key status."); }
+    }
+    private TextView label(LinearLayout root, String text) {
+        TextView view = new TextView(this); view.setText(text); view.setPadding(0,16,0,8); root.addView(view); return view;
+    }
     @Override protected void onResume() {
         super.onResume();
         if (settings != null && voice != null) {
-            voice.setTonesEnabled(settings.audioTonesEnabled());
             voice.setLanguage(settings.locale());
+            voice.setTonesEnabled(settings.audioTonesEnabled());
         }
-        advanceSetup();
     }
-    @Override protected void onPause() { if (voice != null) voice.stop(); super.onPause(); }
-    @Override public void onRequestPermissionsResult(int code, String[] permissions, int[] results) {
-        super.onRequestPermissionsResult(code,permissions,results);
-        if (code == 7) advanceSetup();
+    @Override protected void onPause() {
+        if (voice != null) voice.stop();
+        super.onPause();
     }
-    @Override protected void onSaveInstanceState(Bundle state) { super.onSaveInstanceState(state); state.putInt("setup_attempted",setupAttempted); state.putBoolean("setup_running",setupRunning); }
-    @Override protected void onDestroy() { if (voice != null) voice.destroy(); super.onDestroy(); }
-    private TextView label(LinearLayout root, String text) { TextView view = new TextView(this); view.setText(text); view.setTextSize(18); view.setPadding(0,16,0,8); root.addView(view); return view; }
-    private void updateKeyStatus() {
-        try { keyStatus.setText(settings.apiKey(current).isEmpty() ? "No saved key. Enter your key above." : "A key is saved. Leave the field blank to keep it, or enter a replacement."); }
-        catch (Exception e) { keyStatus.setText("Saved key cannot be read. Remove it and enter a replacement."); }
+    @Override protected void onDestroy() {
+        if (voice != null) voice.destroy();
+        super.onDestroy();
     }
 }

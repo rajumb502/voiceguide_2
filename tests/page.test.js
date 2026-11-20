@@ -58,4 +58,12 @@ assert.equal(field.scrolled, true);
 snapshot = JSON.parse(api.snapshot());
 assert.equal(snapshot.nodes.find(n => n.id === fieldId).type, 'search');
 assert.equal(snapshot.nodes.find(n => n.id === fieldId).label, 'Search Amazon');
-console.log('Page extraction, search discovery and click validation tests passed');
+
+// Verify Macro Step Execution
+const previousClicks = clicks;
+assert.equal(api.executeMacroStep({action: 'CLICK', label: 'Pay now', tag: 'BUTTON'}), true);
+assert.equal(clicks, previousClicks + 1);
+assert.equal(api.executeMacroStep({action: 'CLICK', label: 'Non-existent button', tag: 'BUTTON'}), false);
+assert.equal(api.executeMacroStep(null), false);
+
+console.log('Page extraction, search discovery, click validation, and macro execution tests passed');
