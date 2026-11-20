@@ -84,3 +84,51 @@
   - Allow saving successful multi-step workflows (e.g., *\"Check BESCOM Bill\"*) and replaying them locally via DOM clicks, invoking Gemini only if a selector breaks.
   - Enforce high-stakes action guardrails during macro replay: any step matching sensitive actions (`pay`, `submit`, `confirm`, `transfer`, `delete`, `otp`) pauses replay and routes through `ActionSafetyGuard`, requiring physical Volume Up double-press within 1,200ms and rejecting spoken confirmation.
   - *Status:* **Completed.** Implemented `MacroStore.java` with Keystore encryption, step sequencing (`CLICK`, `TYPE`, `NAVIGATE`, `SCROLL`, `SUBMIT`), and voice command matching. Extended `page.js` with `executeMacroStep()` and automated selector generation. Integrated into `VoiceBrowserActivity.java` with voice-guided recording upon task completion ("save macro as [name]"), instant deterministic local replay ("run macro [name]"), macro management ("list macros", "delete macro [name]"), high-stakes hardware confirmation pause/resume, and automatic smooth fallback to Gemini if an expected element is missing or page structure changes. Verified with `MacroStoreTest.java` and `MacroReplayTest.java`.
+
+---
+
+## Phase 5: Post-Implementation Audit & Pre-Pilot Hardening
+*Goal: Address real-world hardware edge cases, Accessibility Service upgrades, and pilot readiness.*
+
+### P0 — Critical Real-World Blockers
+- [ ] **Task 5.1: Activate `AccessibilityService` to Auto-Approve SMS User Consent Dialogs (`BackgroundVoiceService.java` & `SmsOtpHelper.java`)**
+  - Enable `canRetrieveWindowContent="true"` in `res/xml/accessibility_service_config.xml`.
+  - Set a short-lived `awaitingSmsConsent` flag in `SmsOtpHelper` when listening for an OTP.
+  - In `BackgroundVoiceService.onAccessibilityEvent()`, detect `TYPE_WINDOW_STATE_CHANGED` from `com.google.android.gms` containing the SMS consent prompt, locate the `"Allow"` node (`com.google.android.gms:id/positive_button` or text `"Allow"`), and click it automatically.
+  - Maintain mandatory `ActionSafetyGuard` hardware Volume Up double-press before entering OTP.
+  - *Status:* **Not Started.**
+- [ ] **Task 5.2: Resolve Payment `<iframe>` Screenshot Suppression Conflict (`VoiceBrowserActivity.java` & `page.js`)**
+  - Allow consented screenshots when a tagged payment `<iframe>` is present on page while keeping main-document passwords and raw card inputs redacted/suppressed.
+  - Ensure `window.scrollY` stability between snapshot capture and `dispatchCoordinateTap()`.
+  - *Status:* **Not Started.**
+- [ ] **Task 5.3: Migrate Global Volume Key Interception to `AccessibilityService.onKeyEvent()` (`BackgroundVoiceService.java` & `res/xml/accessibility_service_config.xml`)**
+  - Add `android:canRequestFilterKeyEvents="true"` to `accessibility_service_config.xml` and request key filtering flag.
+  - Route volume key events via `BackgroundVoiceService` to `ActionSafetyGuard` so hardware confirmation works even if an external system dialog or payment bottom-sheet overlays the activity.
+  - Filter `repeatCount == 0` to preserve TalkBack's dual-volume 3-second hold shortcut.
+  - *Status:* **Not Started.**
+
+### P1 — High-Priority Indian UX & Hardware Reality Fixes
+- [ ] **Task 5.4: Guide Users Past Android 13+ "Restricted Settings" During Onboarding (`SettingsActivity.java`)**
+  - Detect when accessibility service activation is restricted on Android 13+ sideloaded builds.
+  - Speak step-by-step instructions and launch `Settings.ACTION_APPLICATION_DETAILS_SETTINGS` to direct users to "Allow restricted settings".
+  - *Status:* **Not Started.**
+- [ ] **Task 5.5: Harden React / Angular Synthetic Input Dispatching (`page.js`)**
+  - Ensure native prototype property descriptors (`HTMLInputElement.prototype.value.set`) and bubbling `input`, `change`, and `blur` events are dispatched for input fields.
+  - *Status:* **Not Started.**
+- [ ] **Task 5.6: Expand Sensitive Field Redaction Regex (`page.js`)**
+  - Expand redaction regex to cover Indian mobile patterns: `otp`, `pin`, `mpin`, `cvv`, `aadhaar`, `pan`, `password`, `secret` across `id`, `name`, `placeholder`, `aria-label`, and associated `<label>`.
+  - *Status:* **Not Started.**
+- [ ] **Task 5.7: Add Semantic Anchor Fallbacks to Local Macros (`MacroStore.java` & `page.js`)**
+  - Store and match accessible labels, aria-labels, and input placeholders alongside CSS selectors in `MacroStore` and `page.js` during replay.
+  - *Status:* **Not Started.**
+
+### P2 — Documentation, Cleanup & Physical Device Validation
+- [ ] **Task 5.8: Sync `README.md` with Completed Phases 1–4 (`tasks.md`)**
+  - Document Volume Up double-press hardware confirmation, Audio Landmark Briefs, SMS User Consent auto-read, Encrypted Local Macros, and AccessibilityService integration.
+  - *Status:* **Not Started.**
+- [ ] **Task 5.9: Archive Unused Prototype Files (`backend/server.py`)**
+  - Move legacy `backend/server.py` to `prototypes/` or document its archival.
+  - *Status:* **Not Started.**
+- [ ] **Task 5.10: Document Physical Device Verification Suite Checklist (With TalkBack Enabled)**
+  - Document step-by-step manual test protocols for TalkBack coexistence, Wikipedia landmark brief, BESCOM React billing portal, and GMS SMS sheet auto-click.
+  - *Status:* **Not Started.**
