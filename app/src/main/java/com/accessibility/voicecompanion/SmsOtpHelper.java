@@ -20,6 +20,24 @@ import java.util.regex.Pattern;
  */
 public class SmsOtpHelper {
     public static final int SMS_CONSENT_REQUEST_CODE = 2001;
+    public static final long CONSENT_TIMEOUT_MS = 5 * 60 * 1000L; // 5 minutes
+
+    private static volatile boolean awaitingSmsConsent = false;
+    private static volatile long awaitingConsentTimestamp = 0;
+
+    public static boolean isAwaitingSmsConsent() {
+        if (!awaitingSmsConsent) return false;
+        if (System.currentTimeMillis() - awaitingConsentTimestamp > CONSENT_TIMEOUT_MS) {
+            awaitingSmsConsent = false;
+            return false;
+        }
+        return true;
+    }
+
+    public static void setAwaitingSmsConsent(boolean awaiting) {
+        awaitingSmsConsent = awaiting;
+        awaitingConsentTimestamp = awaiting ? System.currentTimeMillis() : 0;
+    }
 
     public interface OtpListener {
         void onOtpReceived(String otpCode, String rawMessage);
@@ -37,6 +55,7 @@ public class SmsOtpHelper {
         stopListening();
         this.activityRef = new WeakReference<>(activity);
         this.listenerRef = new WeakReference<>(listener);
+        setAwaitingSmsConsent(true);
 
         try {
             SmsRetriever.getClient(activity).startSmsUserConsent(null);
@@ -59,12 +78,15 @@ public class SmsOtpHelper {
                     Activity act = activityRef != null ? activityRef.get() : null;
                     if (consentIntent != null && act != null && !act.isFinishing()) {
                         try {
+                            setAwaitingSmsConsent(true);
                             act.startActivityForResult(consentIntent, SMS_CONSENT_REQUEST_CODE);
                         } catch (Exception e) {
+                            setAwaitingSmsConsent(false);
                             notifyError("Could not display SMS consent dialog: " + e.getMessage());
                         }
                     }
                 } else if (statusCode == CommonStatusCodes.TIMEOUT) {
+                    setAwaitingSmsConsent(false);
                     notifyError("SMS consent timed out.");
                 }
             }
@@ -84,6 +106,7 @@ public class SmsOtpHelper {
     }
 
     public synchronized void stopListening() {
+        setAwaitingSmsConsent(false);
         if (isRegistered && receiver != null) {
             Activity act = activityRef != null ? activityRef.get() : null;
             if (act != null) {
@@ -98,6 +121,7 @@ public class SmsOtpHelper {
 
     public boolean handleActivityResult(int requestCode, int resultCode, Intent data) {
         if (requestCode != SMS_CONSENT_REQUEST_CODE) return false;
+        setAwaitingSmsConsent(false);
         if (resultCode == Activity.RESULT_OK && data != null) {
             String message = data.getStringExtra(SmsRetriever.EXTRA_SMS_MESSAGE);
             String otp = extractOtp(message);
@@ -148,16 +172,18 @@ public class SmsOtpHelper {
     }
 
     /**
-     * Spells out digits with spaces so screen readers / TTS speak digits individually.
-     * e.g., "482910" -> "4 8 2 9 1 0"
+     * Formats OTP digits with spaces so TTS speaks them clearly digit by digit.
+     * e.g. "482910" -> "4 8 2 9 1 0"
      */
-    public static String formatDigitsForSpeech(String otp) {
-        if (otp == null) return "";
+    public static String formatDigitsForSpeech(String digits) {
+        if (digits == null || digits.isEmpty()) return "";
         StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < otp.length(); i++) {
-            if (i > 0) sb.append(' ');
-            sb.append(otp.charAt(i));
+        for (int i = 0; i < digits.length(); i++) {
+            char c = digits.charAt(i);
+            if (Character.isDigit(c)) {
+                sb.append(c).append(' ');
+            }
         }
-        return sb.toString();
+        return sb.toString().trim();
     }
 }
