@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.content.Intent;
 import android.os.Build;
 import android.os.Bundle;
+import android.net.Uri;
 import android.provider.Settings;
 import android.text.InputFilter;
 import android.text.InputType;
@@ -155,6 +156,16 @@ public class SettingsActivity extends Activity implements VoiceEngineManager.Cal
             return;
         }
         if (!isAccessibilityServiceEnabled()) {
+            if (Build.VERSION.SDK_INT >= 33 && setupAttempted > 0) {
+                setupAction = () -> {
+                    Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+                    intent.setData(Uri.parse("package:" + getPackageName()));
+                    startActivity(intent);
+                };
+                voice.guide("Accessibility service is blocked by Android restricted settings on sideloaded apps. Say allow to open App Info. Then tap the three dots in the top right corner and tap Allow restricted settings.", () -> voice.listen(settings.locale()));
+                return;
+            }
+            setupAttempted++;
             setupAction = () -> startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));
             voice.guide("Step 2. Accessibility Service is recommended for screen interaction. Say enable to open Android accessibility settings.", () -> voice.listen(settings.locale()));
             return;
@@ -211,7 +222,7 @@ public class SettingsActivity extends Activity implements VoiceEngineManager.Cal
             return;
         }
         if (norm.matches("start setup|begin setup|setup")) {
-            setupRunning = true; setupAttempted = 0;
+            setupRunning = true;
             advanceSetup();
             return;
         }
@@ -379,6 +390,9 @@ public class SettingsActivity extends Activity implements VoiceEngineManager.Cal
         if (settings != null && voice != null) {
             voice.setLanguage(settings.locale());
             voice.setTonesEnabled(settings.audioTonesEnabled());
+        }
+        if (setupRunning && setupAttempted > 0) {
+            advanceSetup();
         }
     }
     @Override protected void onPause() {

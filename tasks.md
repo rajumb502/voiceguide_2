@@ -16,9 +16,10 @@
   - *Status:* **Completed.** Added `canRequestFilterKeyEvents="true"` and `flagRequestFilterKeyEvents` to `accessibility_service_config.xml`. Configured `FLAG_REQUEST_FILTER_KEY_EVENTS` dynamically in `BackgroundVoiceService.onServiceConnected()`. Implemented `onKeyEvent()` global delegation via `KeyEventListener` routing to `VoiceBrowserActivity.dispatchKeyEvent()` with `repeatCount == 0` filtering and volume-stream suppression. Verified in `BackgroundVoiceServiceTest.java`.
 
 ### P1 — High-Priority Indian UX & Hardware Reality Fixes
-- [ ] **Task 5.4: Guide Users Past Android 13+ "Restricted Settings" During Onboarding (`SettingsActivity.java`)**
+- [x] **Task 5.4: Guide Users Past Android 13+ "Restricted Settings" During Onboarding (`SettingsActivity.java`)**
   - Detect when accessibility service activation is restricted on Android 13+ sideloaded builds.
   - Speak step-by-step instructions and launch `Settings.ACTION_APPLICATION_DETAILS_SETTINGS` to direct users to "Allow restricted settings".
+  - *Status:* **Completed.** Detects Android 13+ (`Build.VERSION.SDK_INT >= 33`) with failed initial accessibility activation in `advanceSetup()`; speaks step-by-step guidance directing user to App Info top-right menu; automatically launches `Settings.ACTION_APPLICATION_DETAILS_SETTINGS` targeting package URI. Verified with `SettingsActivityTest.java`.
 - [ ] **Task 5.5: Harden React / Angular Synthetic Input Dispatching (`page.js`)**
   - Ensure native prototype property descriptors (`HTMLInputElement.prototype.value.set`) and bubbling `input`, `change`, and `blur` events are dispatched for input fields.
 - [ ] **Task 5.6: Expand Sensitive Field Redaction Regex (`page.js`)**
