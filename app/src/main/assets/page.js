@@ -98,11 +98,16 @@
   }
   function snapshot() {
     targets = new Map(); const nodes = []; let sensitive = false;
+    let hasIframe = false, hasPaymentFrame = false;
     notifyBridge();
     function walk(root) {
       observe(root);
       for (const el of root.querySelectorAll('*')) {
-        if (el.tagName === 'IFRAME' || el.isContentEditable) sensitive = true;
+        if (el.tagName === 'IFRAME') {
+          hasIframe = true;
+          hasPaymentFrame = true;
+        }
+        if (el.isContentEditable) sensitive = true;
         if (el.matches('input,textarea,select') && sensitiveField(el)) sensitive = true;
         if (el.shadowRoot) walk(el.shadowRoot);
         if (!visible(el) || !el.matches('a,button,input,select,textarea,[role=button],[role=link],h1,h2,h3,p,label,iframe')) continue;
@@ -127,6 +132,7 @@
           search: !isSensitive && isSearch(el),
           search_form: !isSensitive && searchForm(el),
           sensitive: isSensitive,
+          payment_frame: el.tagName === 'IFRAME',
           filled: privateField && !!el.value,
           disabled: !!el.disabled || el.getAttribute('aria-disabled') === 'true',
           editable: privateField && !isSensitive,
@@ -138,7 +144,20 @@
       }
     }
     walk(document);
-    return JSON.stringify({revision, url:location.href, title:document.title || '', site:location.hostname || '', scroll_y:window.scrollY || 0, width:innerWidth, height:innerHeight, sensitive, nodes: nodes.sort((a,b) => Number(b.editable) - Number(a.editable)).slice(0,150)});
+    return JSON.stringify({
+      revision,
+      url: location.href,
+      title: document.title || '',
+      site: location.hostname || '',
+      scroll_y: window.scrollY || 0,
+      scroll_x: window.scrollX || 0,
+      width: innerWidth,
+      height: innerHeight,
+      sensitive,
+      has_iframe: hasIframe,
+      has_payment_frame: hasPaymentFrame,
+      nodes: nodes.sort((a,b) => Number(b.editable) - Number(a.editable)).slice(0,150)
+    });
   }
   function click(id, expectedRevision, requireUnchangedPage = true) {
     const t = targets.get(id);

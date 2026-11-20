@@ -56,12 +56,15 @@ public final class AssistantClient {
             if (sensitive(node)) continue;
             for (String name : new String[]{"id","label","disabled","editable","x","y","width","height"}) copy.put(name, node.get(name));
             for (String name : new String[]{"tag","role","type","name","placeholder","href","autocomplete"}) if (node.has(name)) copy.put(name,node.getString(name));
-            for (String name : new String[]{"clickable","search","search_form","sensitive","filled","download"}) if (node.has(name)) copy.put(name,node.getBoolean(name));
+            for (String name : new String[]{"clickable","search","search_form","sensitive","filled","download","payment_frame"}) if (node.has(name)) copy.put(name,node.getBoolean(name));
             clean.put(copy);
         }
         JSONObject result = new JSONObject().put("nodes",clean).put("width",snapshot.getDouble("width")).put("height",snapshot.getDouble("height"));
         for (String name : new String[]{"title","site"}) if (snapshot.has(name)) result.put(name,snapshot.getString(name));
         if (snapshot.has("scroll_y")) result.put("scroll_y",snapshot.getDouble("scroll_y"));
+        if (snapshot.has("scroll_x")) result.put("scroll_x",snapshot.getDouble("scroll_x"));
+        if (snapshot.has("has_iframe")) result.put("has_iframe",snapshot.getBoolean("has_iframe"));
+        if (snapshot.has("has_payment_frame")) result.put("has_payment_frame",snapshot.getBoolean("has_payment_frame"));
         return result;
     }
     static JSONObject body(String provider, String model, JSONObject payload) throws JSONException {
@@ -74,7 +77,7 @@ public final class AssistantClient {
         if (payload.has("user_preferences")) context.put("user_preferences",payload.getString("user_preferences"));
         if (payload.has("task_history")) context.put("task_history",payload.getJSONArray("task_history"));
         String text = context.toString();
-        boolean image = payload.has("image") && !snapshot.getBoolean("sensitive");
+        boolean image = payload.has("image") && !snapshot.optBoolean("sensitive", false);
         for (int i=0;i<snapshot.getJSONArray("nodes").length();i++) if (sensitive(snapshot.getJSONArray("nodes").getJSONObject(i))) image = false;
         if (provider.equals(AssistantSettings.GEMINI)) {
             JSONArray parts = new JSONArray().put(new JSONObject().put("text",text));
@@ -125,6 +128,12 @@ public final class AssistantClient {
         for (String name : new String[]{"text","url","direction"}) {
             if (!action.has(name)) action.put(name, "");
             if (!(action.get(name) instanceof String) || action.getString(name).length()>2000) throw new JSONException("Invalid argument");
+        }
+        if (action.has("x") && !Double.isNaN(action.optDouble("x", Double.NaN))) {
+            if (action.optDouble("x", -1) < 0) throw new JSONException("Invalid coordinate x");
+        }
+        if (action.has("y") && !Double.isNaN(action.optDouble("y", Double.NaN))) {
+            if (action.optDouble("y", -1) < 0) throw new JSONException("Invalid coordinate y");
         }
         if (kind.equals("NAVIGATE")) {
             String url = action.getString("url");

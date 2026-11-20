@@ -30,6 +30,22 @@ public class AssistantClientTest {
         JSONObject payload = payload(); payload.getJSONObject("snapshot").put("sensitive",true);
         for (String provider : new String[]{AssistantSettings.GEMINI, AssistantSettings.OPENAI}) assertFalse(AssistantClient.body(provider,"model",payload).toString().contains("jpeg-data"));
     }
+
+    @Test public void paymentIframesPreserveImagesWhenMainPageNotSensitive() throws Exception {
+        JSONObject payload = payload();
+        JSONObject snap = payload.getJSONObject("snapshot");
+        snap.put("has_payment_frame", true);
+        snap.put("has_iframe", true);
+        snap.put("sensitive", false);
+        JSONObject iframeNode = new JSONObject().put("id", "pay-frame").put("tag", "IFRAME").put("label", "Razorpay Payment").put("payment_frame", true).put("disabled", false).put("editable", false).put("clickable", true).put("x", 50).put("y", 100).put("width", 300).put("height", 400);
+        snap.getJSONArray("nodes").put(iframeNode);
+
+        for (String provider : new String[]{AssistantSettings.GEMINI, AssistantSettings.OPENAI}) {
+            String body = AssistantClient.body(provider, "model", payload).toString();
+            assertTrue(body.contains("jpeg-data"));
+            assertTrue(body.contains("Razorpay Payment"));
+        }
+    }
     @Test public void clickValidationForcesConfirmationAndRejectsBadTargets() throws Exception {
         JSONObject snapshot = payload().getJSONObject("snapshot");
         assertTrue(AgentPolicy.needsConfirmation(AssistantClient.validate(action(),snapshot),snapshot));

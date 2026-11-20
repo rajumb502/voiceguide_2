@@ -292,10 +292,14 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
     }
 
     boolean dispatchCoordinateTap(float cssX, float cssY) {
-        return dispatchCoordinateTap(cssX, cssY, -1f, -1f);
+        return dispatchCoordinateTap(cssX, cssY, -1f, -1f, 0f, 0f);
     }
 
     boolean dispatchCoordinateTap(float cssX, float cssY, float cssViewportWidth, float cssViewportHeight) {
+        return dispatchCoordinateTap(cssX, cssY, cssViewportWidth, cssViewportHeight, 0f, 0f);
+    }
+
+    boolean dispatchCoordinateTap(float cssX, float cssY, float cssViewportWidth, float cssViewportHeight, float scrollDeltaX, float scrollDeltaY) {
         if (web == null) return false;
         try {
             float density = getResources().getDisplayMetrics().density;
@@ -317,8 +321,12 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
                 scaleY = (float) viewHeight / cssViewportHeight;
             }
 
-            float screenX = cssX * scaleX;
-            float screenY = cssY * scaleY;
+            // Compensate for scroll offset change between snapshot capture and tap
+            float adjustedCssX = cssX - scrollDeltaX;
+            float adjustedCssY = cssY - scrollDeltaY;
+
+            float screenX = adjustedCssX * scaleX;
+            float screenY = adjustedCssY * scaleY;
 
             // Clamp within visible WebView bounds
             if (viewWidth > 0) screenX = Math.max(0f, Math.min(screenX, (float) viewWidth));
@@ -699,7 +707,7 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
                 JSONObject payload = new JSONObject().put("command", text).put("snapshot", snapshot).put("conversation_history", conversation != null ? conversation.snapshot(snapshot.getString("site")) : new JSONArray()).put("current_page",ConversationMemory.page(web.getUrl(),web.getTitle(),navigation)).put("task_history",new JSONArray(agent.history())).put("locale", locale);
                 if (settings.rememberPreferences()) payload.put("user_preferences","Preferred language: " + settings.locale() + "\n" + settings.userPreferences());
                 Bitmap captured = null;
-                if (settings.screenshotsEnabled() && !snapshot.getBoolean("sensitive")) {
+                if (settings.screenshotsEnabled() && !snapshot.optBoolean("sensitive", false)) {
                     int width = web.getWidth(), height = web.getHeight();
                     if (width <= 0 || height <= 0) throw new IllegalStateException("Page has no viewport");
                     float scale = Math.min(1f, 720f / Math.max(width, height));
@@ -1073,9 +1081,24 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
             } else {
                 domStep = new MacroStore.Step(kind, "", "", "", "", "", "", action.optString("text", ""), "", "");
             }
-            web.evaluateJavascript("window.__vc && window.__vc.perform(" + action.toString() + "," + snapshot.getLong("revision") + "," + approved + ")", result -> {
+            web.evaluateJavascript("(function(){ var ok = window.__vc && window.__vc.perform(" + action.toString() + "," + snapshot.getLong("revision") + "," + approved + "); return JSON.stringify({ok: !!ok, sx: window.scrollX || 0, sy: window.scrollY || 0}); })()", result -> {
                 if (!active || !agent.running() || requestId != actionTicket || navigation != nav) return;
-                boolean success = "true".equals(result);
+                boolean success = false;
+                float scrollDeltaX = 0f, scrollDeltaY = 0f;
+                try {
+                    Object decoded = new JSONTokener(result).nextValue();
+                    if (decoded instanceof String) decoded = new JSONTokener((String) decoded).nextValue();
+                    if (decoded instanceof JSONObject) {
+                        JSONObject rObj = (JSONObject) decoded;
+                        success = rObj.optBoolean("ok", false);
+                        scrollDeltaX = (float) (rObj.optDouble("sx", snapshot.optDouble("scroll_x", 0.0)) - snapshot.optDouble("scroll_x", 0.0));
+                        scrollDeltaY = (float) (rObj.optDouble("sy", snapshot.optDouble("scroll_y", 0.0)) - snapshot.optDouble("scroll_y", 0.0));
+                    } else {
+                        success = "true".equals(result) || Boolean.TRUE.equals(decoded);
+                    }
+                } catch (Exception ignored) {
+                    success = "true".equals(result);
+                }
                 if (!success && kind.equals("CLICK")) {
                     double cx = -1, cy = -1;
                     if (action.has("x") && action.has("y")) {
@@ -1088,7 +1111,7 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
                     if (cx >= 0 && cy >= 0) {
                         float vWidth = (float) snapshot.optDouble("width", -1);
                         float vHeight = (float) snapshot.optDouble("height", -1);
-                        success = dispatchCoordinateTap((float) cx, (float) cy, vWidth, vHeight);
+                        success = dispatchCoordinateTap((float) cx, (float) cy, vWidth, vHeight, scrollDeltaX, scrollDeltaY);
                     }
                 }
                 if (success) {
