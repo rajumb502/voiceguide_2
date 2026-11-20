@@ -143,7 +143,7 @@
   function click(id, expectedRevision, requireUnchangedPage = true) {
     const t = targets.get(id);
     if (!t || t.revision !== expectedRevision || !t.el.isConnected || !visible(t.el) || t.el.disabled || signature(t.el) !== t.signature || t.el.getAttribute('aria-disabled') === 'true') return false;
-    const risky = /\b(pay(?:ment)?|submit|confirm|transfer|delete|remove|proceed|checkout|otp|logout|book now|send|purchase|buy)\b/i.test(label(t.el));
+    const risky = /\b(pay(?:ment)?|submit|confirm|transfer|delete|remove|proceed|checkout|otp|logout|log out|book now|send|purchase|buy)\b/i.test(label(t.el));
     if (revision !== expectedRevision && (requireUnchangedPage || risky)) return false;
     if (t.el.matches('input,textarea,select')) return false;
     const r = t.el.getBoundingClientRect();
@@ -195,9 +195,13 @@
     target.dispatchEvent(new Event('change', {bubbles: true}));
     return target.value === code;
   }
-  function executeMacroStep(step) {
+  function executeMacroStep(step, approved = false) {
     if (!step) return false;
     const action = step.action;
+    const risky = /\b(pay(?:ment)?|submit|confirm|transfer|delete|remove|proceed|checkout|otp|logout|log out|book now|send|purchase|buy)\b/i.test(
+      [step.action, step.label, step.selector, step.name, step.placeholder].join(' ')
+    );
+    if (risky && !approved) return false;
     function findTarget(s) {
       if (s.selector && typeof document.querySelector === 'function') {
         try {

@@ -59,11 +59,16 @@ snapshot = JSON.parse(api.snapshot());
 assert.equal(snapshot.nodes.find(n => n.id === fieldId).type, 'search');
 assert.equal(snapshot.nodes.find(n => n.id === fieldId).label, 'Search Amazon');
 
-// Verify Macro Step Execution
+// Verify Macro Step Execution with Guardrails
 const previousClicks = clicks;
-assert.equal(api.executeMacroStep({action: 'CLICK', label: 'Pay now', tag: 'BUTTON'}), true);
+// Risky step ("Pay now") is rejected without explicit approval flag
+assert.equal(api.executeMacroStep({action: 'CLICK', label: 'Pay now', tag: 'BUTTON'}, false), false);
+assert.equal(clicks, previousClicks); // Click did not occur
+// When explicitly approved via hardware confirmation, it executes
+assert.equal(api.executeMacroStep({action: 'CLICK', label: 'Pay now', tag: 'BUTTON'}, true), true);
 assert.equal(clicks, previousClicks + 1);
-assert.equal(api.executeMacroStep({action: 'CLICK', label: 'Non-existent button', tag: 'BUTTON'}), false);
+// Non-existent button fails gracefully
+assert.equal(api.executeMacroStep({action: 'CLICK', label: 'Non-existent button', tag: 'BUTTON'}, true), false);
 assert.equal(api.executeMacroStep(null), false);
 
-console.log('Page extraction, search discovery, click validation, and macro execution tests passed');
+console.log('Page extraction, search discovery, click validation, and macro execution with guardrails passed');

@@ -1,5 +1,7 @@
 package com.accessibility.voicecompanion;
 
+import android.os.SystemClock;
+import android.view.KeyEvent;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -66,12 +68,12 @@ public class MacroReplayTest {
     @Test
     public void testReplayMacroExecutionAndFallback() {
         assertNotNull(store);
-        MacroStore.Step step1 = new MacroStore.Step("CLICK", "button#pay", "Pay Now", "BUTTON", "button", "", "", "", "", "");
-        MacroStore.Macro macro = new MacroStore.Macro("pay bill", "https://portal.example.com", Arrays.asList(step1));
+        MacroStore.Step step1 = new MacroStore.Step("CLICK", "button#normal", "Next Page", "BUTTON", "button", "", "", "", "", "");
+        MacroStore.Macro macro = new MacroStore.Macro("read tutorial", "https://portal.example.com", Arrays.asList(step1));
         store.saveMacro(macro);
 
         // Trigger macro replay via voice command
-        activity.simulateVoiceInput("run macro pay bill");
+        activity.simulateVoiceInput("run macro read tutorial");
         assertTrue(activity.isReplayingMacro());
 
         // Step execution when page structure changed/element missing falls back smoothly
@@ -80,5 +82,70 @@ public class MacroReplayTest {
         // Cancelling stops replay
         activity.simulateVoiceInput("stop");
         assertFalse(activity.isReplayingMacro());
+    }
+
+    @Test
+    public void testSensitiveMacroStepRequiresHardwareConfirmation() {
+        assertNotNull(store);
+        MacroStore.Step step1 = new MacroStore.Step("CLICK", "button#pay", "Pay Now", "BUTTON", "button", "", "", "", "", "");
+        MacroStore.Macro macro = new MacroStore.Macro("pay electricity bill", "https://portal.example.com", Arrays.asList(step1));
+        store.saveMacro(macro);
+
+        activity.simulateVoiceInput("run macro pay electricity bill");
+        assertTrue(activity.isReplayingMacro());
+
+        // Reaching high-stakes action "Pay Now" MUST pause and require hardware confirmation
+        activity.executeNextMacroStep();
+        assertNotNull(activity.getPendingMacroStep());
+        assertEquals("Pay Now", activity.getPendingMacroStep().label);
+
+        // 1. Spoken confirmations like "yes" or "haan" must be rejected
+        activity.simulateVoiceInput("yes");
+        activity.simulateVoiceInput("haan");
+        assertNotNull(activity.getPendingMacroStep());
+
+        // 2. Single Volume Up press is not enough
+        long now = SystemClock.elapsedRealtime();
+        KeyEvent volUp1 = new KeyEvent(now, now, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_VOLUME_UP, 0);
+        activity.simulateKeyEvent(volUp1);
+        assertNotNull(activity.getPendingMacroStep());
+
+        // Key repeats must be ignored (protects TalkBack's 3-second two-key hold shortcut)
+        KeyEvent volUpRepeat = new KeyEvent(10, 10, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_VOLUME_UP, 1);
+        activity.simulateKeyEvent(volUpRepeat);
+        assertNotNull(activity.getPendingMacroStep());
+
+        // 3. Second Volume Up press within 1,200ms executes
+        KeyEvent volUp2 = new KeyEvent(now + 300, now + 300, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_VOLUME_UP, 0);
+        assertTrue(activity.simulateKeyEvent(volUp2));
+        assertNull(activity.getPendingMacroStep());
+    }
+
+    @Test
+    public void testSensitiveMacroStepCancelledByVolumeDown() {
+        assertNotNull(store);
+        MacroStore.Step step1 = new MacroStore.Step("SUBMIT", "", "Confirm Payment", "BUTTON", "", "", "", "", "", "");
+        MacroStore.Macro macro = new MacroStore.Macro("instant transfer", "https://portal.example.com", Arrays.asList(step1));
+        store.saveMacro(macro);
+
+        activity.simulateVoiceInput("run macro instant transfer");
+        activity.executeNextMacroStep();
+        assertNotNull(activity.getPendingMacroStep());
+
+        // Volume Down cancels immediately
+        long now = SystemClock.elapsedRealtime();
+        KeyEvent volDown = new KeyEvent(now, now, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_VOLUME_DOWN, 0);
+        assertTrue(activity.simulateKeyEvent(volDown));
+
+        assertNull(activity.getPendingMacroStep());
+        assertFalse(activity.isReplayingMacro());
+    }
+
+    @Test
+    public void testCoordinateTapWithDynamicViewportScaling() {
+        // Assert that coordinate tap with custom viewport bounds (e.g. keyboard open or zoom) calculates scale cleanly
+        boolean result = activity.dispatchCoordinateTap(100f, 200f, 400f, 600f);
+        // Returns true or false depending on whether webview handled the simulated touch event in Robolectric
+        assertFalse(result); // in Robolectric mock webview with 0 dimensions, clamps cleanly without crash
     }
 }

@@ -6,6 +6,7 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
+import android.media.AudioManager;
 import android.net.Uri;
 import android.os.*;
 import android.text.InputType;
@@ -48,6 +49,7 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
     private final AndroidVoiceBridge bridge = new AndroidVoiceBridge();
     private JSONObject pendingProposal, pendingSnapshot;
     private String pendingOtpCode;
+    private MacroStore.Step pendingMacroStep;
     private boolean agentActing, pageLoading;
     private long loadStarted;
     private Runnable continuation;
@@ -70,6 +72,7 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
+        setVolumeControlStream(AudioManager.STREAM_MUSIC);
         try {
             settings = new AssistantSettings(this);
             conversation = new ConversationMemory(this);
@@ -200,41 +203,49 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
     }
 
     @Override public boolean dispatchKeyEvent(KeyEvent event) {
-        if (event.getAction() == KeyEvent.ACTION_DOWN) {
-            int keyCode = event.getKeyCode();
-            if (keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
-                if (guard.hasPending()) {
-                    ActionSafetyGuard.Pending pending = guard.onVolumeUp(SystemClock.elapsedRealtime(), navigation);
-                    if (pending != null) {
-                        if (pendingProposal != null) {
-                            if (voice != null) voice.playSuccessChime();
-                            agent.answer("Approved via hardware confirmation.");
-                            JSONObject proposal = pendingProposal, snapshot = pendingSnapshot;
-                            pendingProposal = pendingSnapshot = null;
-                            executeAgentAction(proposal, snapshot, pending.navigation(), true);
-                        } else if (pendingOtpCode != null) {
-                            if (voice != null) voice.playSuccessChime();
-                            String otp = pendingOtpCode;
-                            pendingOtpCode = null;
-                            agent.answer("Approved OTP entry via hardware confirmation.");
-                            executeOtpFill(otp);
+        int keyCode = event.getKeyCode();
+        if (keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
+            if (guard.hasPending()) {
+                if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                    if (event.getRepeatCount() == 0) {
+                        if (keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
+                            ActionSafetyGuard.Pending pending = guard.onVolumeUp(SystemClock.elapsedRealtime(), navigation);
+                            if (pending != null) {
+                                if (pendingProposal != null) {
+                                    if (voice != null) voice.playSuccessChime();
+                                    agent.answer("Approved via hardware confirmation.");
+                                    JSONObject proposal = pendingProposal, snapshot = pendingSnapshot;
+                                    pendingProposal = pendingSnapshot = null;
+                                    executeAgentAction(proposal, snapshot, pending.navigation(), true);
+                                } else if (pendingOtpCode != null) {
+                                    if (voice != null) voice.playSuccessChime();
+                                    String otp = pendingOtpCode;
+                                    pendingOtpCode = null;
+                                    agent.answer("Approved OTP entry via hardware confirmation.");
+                                    executeOtpFill(otp);
+                                } else if (pendingMacroStep != null) {
+                                    if (voice != null) voice.playSuccessChime();
+                                    MacroStore.Step stepToExecute = pendingMacroStep;
+                                    pendingMacroStep = null;
+                                    executeApprovedMacroStep(stepToExecute);
+                                }
+                            }
+                        } else if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
+                            guard.onVolumeDown(SystemClock.elapsedRealtime());
+                            cancel();
+                            if (voice != null) {
+                                voice.playErrorTone();
+                                voice.speak("Action cancelled.");
+                            }
                         }
                     }
-                    return true;
-                } else if (voice != null && voice.isSpeaking()) {
+                }
+                return true; // Consume both ACTION_DOWN and ACTION_UP while pending confirmation to suppress system volume slider
+            } else if (keyCode == KeyEvent.KEYCODE_VOLUME_UP && voice != null && voice.isSpeaking()) {
+                if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
                     voice.interruptAndListen(locale);
-                    return true;
                 }
-            } else if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
-                if (guard.hasPending()) {
-                    guard.onVolumeDown(SystemClock.elapsedRealtime());
-                    cancel();
-                    if (voice != null) {
-                        voice.playErrorTone();
-                        voice.speak("Action cancelled.");
-                    }
-                    return true;
-                }
+                return true;
             }
         }
         return super.dispatchKeyEvent(event);
@@ -281,11 +292,38 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
     }
 
     boolean dispatchCoordinateTap(float cssX, float cssY) {
+        return dispatchCoordinateTap(cssX, cssY, -1f, -1f);
+    }
+
+    boolean dispatchCoordinateTap(float cssX, float cssY, float cssViewportWidth, float cssViewportHeight) {
         if (web == null) return false;
         try {
             float density = getResources().getDisplayMetrics().density;
-            float screenX = cssX * density;
-            float screenY = cssY * density;
+            float scaleX = density;
+            float scaleY = density;
+
+            int viewWidth = web.getWidth();
+            int viewHeight = web.getHeight();
+
+            // When viewport CSS dimensions from snapshot (innerWidth/innerHeight) are available,
+            // calculate the exact viewport-to-view scale ratio. This dynamically handles:
+            // 1. Soft keyboard opening (which shrinks viewHeight and innerHeight in adjustResize mode)
+            // 2. Pinch zoom or layout viewport scaling
+            // 3. Discrepancies between DisplayMetrics density and window.devicePixelRatio
+            if (viewWidth > 0 && cssViewportWidth > 0) {
+                scaleX = (float) viewWidth / cssViewportWidth;
+            }
+            if (viewHeight > 0 && cssViewportHeight > 0) {
+                scaleY = (float) viewHeight / cssViewportHeight;
+            }
+
+            float screenX = cssX * scaleX;
+            float screenY = cssY * scaleY;
+
+            // Clamp within visible WebView bounds
+            if (viewWidth > 0) screenX = Math.max(0f, Math.min(screenX, (float) viewWidth));
+            if (viewHeight > 0) screenY = Math.max(0f, Math.min(screenY, (float) viewHeight));
+
             long now = SystemClock.uptimeMillis();
             MotionEvent down = MotionEvent.obtain(now, now, MotionEvent.ACTION_DOWN, screenX, screenY, 0);
             MotionEvent up = MotionEvent.obtain(now, now + 50, MotionEvent.ACTION_UP, screenX, screenY, 0);
@@ -333,6 +371,10 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
         return replayingMacro;
     }
 
+    MacroStore.Step getPendingMacroStep() {
+        return pendingMacroStep;
+    }
+
     List<MacroStore.Step> getLastCompletedSteps() {
         return new ArrayList<>(lastCompletedSteps);
     }
@@ -366,6 +408,7 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
     private void cancel() {
         replayingMacro = false;
         activeReplayMacro = null;
+        pendingMacroStep = null;
         sharing.revoke();
         if (voice != null) voice.stopThinkingPulse();
         requestId++; busy = false; agentActing = false; agent.stop(); guard.clear(); pendingProposal = pendingSnapshot = null;
@@ -534,9 +577,33 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
             main.postDelayed(this::executeNextMacroStep, 800);
             return;
         }
+        String stepDescriptor = (step.action + " " + step.label + " " + step.selector + " " + step.name + " " + step.placeholder).trim();
+        boolean isHighStakes = "SUBMIT".equalsIgnoreCase(step.action) || guard.requiresConfirmation(false, stepDescriptor);
+
+        if (isHighStakes) {
+            pendingMacroStep = step;
+            String summary = "Macro " + activeReplayMacro.name + ": " + (step.label.isEmpty() ? step.action : step.label);
+            guard.queue(new ActionSafetyGuard.Pending("macro_step_" + macroReplayStepIndex, 0L, navigation, SystemClock.elapsedRealtime(), summary));
+            main.postDelayed(() -> {
+                if (guard.hasPending() && pendingMacroStep == step) {
+                    cancel();
+                    if (voice != null) {
+                        voice.playErrorTone();
+                        voice.speak("Macro confirmation timed out for your safety.");
+                    }
+                }
+            }, ActionSafetyGuard.TIMEOUT_MS);
+            String question = "High-stakes action in macro: " + (step.label.isEmpty() ? step.action : step.label) +
+                ". Double-press Volume Up to confirm, or press Volume Down to cancel. Spoken confirmation is not accepted.";
+            remember("Assistant confirmation: " + question);
+            agent.ask();
+            if (voice != null) voice.speak(question);
+            return;
+        }
+
         try {
             JSONObject stepJson = step.toJson();
-            web.evaluateJavascript("window.__vc ? window.__vc.executeMacroStep(" + stepJson.toString() + ") : false", res -> {
+            web.evaluateJavascript("window.__vc ? window.__vc.executeMacroStep(" + stepJson.toString() + ", false) : false", res -> {
                 boolean success = "true".equals(res);
                 if (success) {
                     macroReplayStepIndex++;
@@ -561,6 +628,38 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
                 voice.playErrorTone();
                 voice.speak("Could not execute macro step. Asking AI assistant to help.");
             }
+            if (broken != null) {
+                agent.start("Continue workflow: " + broken.name);
+                requestAssistant(agent.goal());
+            }
+        }
+    }
+
+    private void executeApprovedMacroStep(MacroStore.Step step) {
+        if (!active || !replayingMacro || activeReplayMacro == null) return;
+        try {
+            JSONObject stepJson = step.toJson();
+            web.evaluateJavascript("window.__vc ? window.__vc.executeMacroStep(" + stepJson.toString() + ", true) : false", res -> {
+                boolean success = "true".equals(res);
+                if (success) {
+                    macroReplayStepIndex++;
+                    main.postDelayed(this::executeNextMacroStep, 1000);
+                } else {
+                    replayingMacro = false;
+                    MacroStore.Macro broken = activeReplayMacro;
+                    activeReplayMacro = null;
+                    if (voice != null) {
+                        voice.playErrorTone();
+                        voice.speak("Could not execute sensitive step in macro. Asking AI assistant to complete the workflow.");
+                    }
+                    agent.start("Continue workflow: " + broken.name);
+                    requestAssistant(agent.goal());
+                }
+            });
+        } catch (Exception e) {
+            replayingMacro = false;
+            MacroStore.Macro broken = activeReplayMacro;
+            activeReplayMacro = null;
             if (broken != null) {
                 agent.start("Continue workflow: " + broken.name);
                 requestAssistant(agent.goal());
@@ -987,7 +1086,9 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
                         cy = targetNode.optDouble("y", 0) + targetNode.optDouble("height", 0) / 2.0;
                     }
                     if (cx >= 0 && cy >= 0) {
-                        success = dispatchCoordinateTap((float) cx, (float) cy);
+                        float vWidth = (float) snapshot.optDouble("width", -1);
+                        float vHeight = (float) snapshot.optDouble("height", -1);
+                        success = dispatchCoordinateTap((float) cx, (float) cy, vWidth, vHeight);
                     }
                 }
                 if (success) {
@@ -1037,6 +1138,7 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
         active = false;
         replayingMacro = false;
         activeReplayMacro = null;
+        pendingMacroStep = null;
         if (smsOtpHelper != null) smsOtpHelper.stopListening();
         cancel();
         if (voice != null) voice.stop();
