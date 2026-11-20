@@ -173,6 +173,24 @@
     if (!hit || !(hit === t.el || t.el.contains(hit))) return false;
     t.el.click(); return true;
   }
+  function dispatchNativeInput(el, text) {
+    if (!el || !el.matches?.('input,textarea')) return false;
+    const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    const desc = Object.getOwnPropertyDescriptor(proto, 'value');
+    const setter = desc?.set;
+    if (typeof el.focus === 'function') el.focus();
+    if (setter) {
+      setter.call(el, text);
+    } else {
+      el.value = text;
+    }
+    if (typeof el.dispatchEvent === 'function') {
+      el.dispatchEvent(new Event('input', {bubbles: true}));
+      el.dispatchEvent(new Event('change', {bubbles: true}));
+      el.dispatchEvent(new Event('blur', {bubbles: true}));
+    }
+    return el.value === text;
+  }
   function enterOtp(code) {
     if (!code) return false;
     let target = null;
@@ -205,14 +223,7 @@
       }
     }
     if (!target) return false;
-    const proto = target.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
-    const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
-    if (!setter) return false;
-    target.focus();
-    setter.call(target, code);
-    target.dispatchEvent(new Event('input', {bubbles: true}));
-    target.dispatchEvent(new Event('change', {bubbles: true}));
-    return target.value === code;
+    return dispatchNativeInput(target, code);
   }
   function executeMacroStep(step, approved = false) {
     if (!step) return false;
@@ -256,16 +267,7 @@
     if (action === 'TYPE') {
       const el = findTarget(step);
       if (!el || !el.matches?.('input,textarea')) return false;
-      const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
-      const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
-      if (!setter) return false;
-      if (typeof el.focus === 'function') el.focus();
-      setter.call(el, step.text || '');
-      if (typeof el.dispatchEvent === 'function') {
-        el.dispatchEvent(new Event('input', {bubbles: true}));
-        el.dispatchEvent(new Event('change', {bubbles: true}));
-      }
-      return el.value === (step.text || '');
+      return dispatchNativeInput(el, step.text || '');
     }
     if (action === 'SUBMIT') {
       const el = findTarget(step);
@@ -288,12 +290,7 @@
     if (hit !== el && !el.contains(hit)) return false;
     if (action.action === 'TYPE') {
       if (!el.matches('input,textarea') || (el.tagName === 'INPUT' && !['text','search','email','tel','url','number',''].includes(el.getAttribute('type') || ''))) return false;
-      const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
-      const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
-      if (!setter) return false;
-      el.focus(); setter.call(el,action.text);
-      el.dispatchEvent(new Event('input',{bubbles:true})); el.dispatchEvent(new Event('change',{bubbles:true}));
-      return el.value === action.text;
+      return dispatchNativeInput(el, action.text);
     }
     if (action.action === 'SUBMIT') {
       if (!el.matches('input,textarea') || !el.form || typeof el.form.requestSubmit !== 'function') return false;

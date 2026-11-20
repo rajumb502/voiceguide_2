@@ -20,8 +20,9 @@
   - Detect when accessibility service activation is restricted on Android 13+ sideloaded builds.
   - Speak step-by-step instructions and launch `Settings.ACTION_APPLICATION_DETAILS_SETTINGS` to direct users to "Allow restricted settings".
   - *Status:* **Completed.** Detects Android 13+ (`Build.VERSION.SDK_INT >= 33`) with failed initial accessibility activation in `advanceSetup()`; speaks step-by-step guidance directing user to App Info top-right menu; automatically launches `Settings.ACTION_APPLICATION_DETAILS_SETTINGS` targeting package URI. Verified with `SettingsActivityTest.java`.
-- [ ] **Task 5.5: Harden React / Angular Synthetic Input Dispatching (`page.js`)**
+- [x] **Task 5.5: Harden React / Angular Synthetic Input Dispatching (`page.js`)**
   - Ensure native prototype property descriptors (`HTMLInputElement.prototype.value.set`) and bubbling `input`, `change`, and `blur` events are dispatched for input fields.
+  - *Status:* **Completed.** Centralized input dispatching in `dispatchNativeInput()` using `Object.getOwnPropertyDescriptor(proto, 'value').set.call(el, text)` across `TYPE`, `enterOtp()`, and `executeMacroStep()`. Dispatches full bubbling synthetic event cascade (`input`, `change`, and `blur`) ensuring full compatibility with React/Angular reactive change detection. Verified in `tests/agent-page.test.js`.
 - [ ] **Task 5.6: Expand Sensitive Field Redaction Regex (`page.js`)**
   - Expand redaction regex to cover Indian mobile patterns: `otp`, `pin`, `mpin`, `cvv`, `aadhaar`, `pan`, `password`, `secret` across `id`, `name`, `placeholder`, `aria-label`, and associated `<label>`.
 - [ ] **Task 5.7: Add Semantic Anchor Fallbacks to Local Macros (`MacroStore.java` & `page.js`)**

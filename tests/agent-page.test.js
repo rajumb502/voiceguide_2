@@ -28,7 +28,7 @@ for (const site of ['library.example','news.example']) {
   assert.equal(reportedHostname, site);
   const api=context.window.__vc; let snapshot=JSON.parse(api.snapshot()); const id=snapshot.nodes[0].id;
   assert.equal(api.perform({action:'TYPE',target_id:id,text:'bird migration'},snapshot.revision,false),true);
-  assert.equal(input.value,'bird migration'); assert.deepEqual(events,['input','change']);
+  assert.equal(input.value,'bird migration'); assert.deepEqual(events,['input','change','blur']);
   snapshot=JSON.parse(api.snapshot()); assert.equal(snapshot.nodes[0].filled,true); assert.equal(snapshot.nodes[0].value,undefined);
   assert.equal(api.perform({action:'SUBMIT',target_id:id},snapshot.revision,false),true); assert.equal(submitted,1);
   overlay=true; assert.equal(api.perform({action:'TYPE',target_id:id,text:'other'},snapshot.revision,false),false); overlay=false;
