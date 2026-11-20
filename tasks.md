@@ -23,8 +23,9 @@
 - [x] **Task 5.5: Harden React / Angular Synthetic Input Dispatching (`page.js`)**
   - Ensure native prototype property descriptors (`HTMLInputElement.prototype.value.set`) and bubbling `input`, `change`, and `blur` events are dispatched for input fields.
   - *Status:* **Completed.** Centralized input dispatching in `dispatchNativeInput()` using `Object.getOwnPropertyDescriptor(proto, 'value').set.call(el, text)` across `TYPE`, `enterOtp()`, and `executeMacroStep()`. Dispatches full bubbling synthetic event cascade (`input`, `change`, and `blur`) ensuring full compatibility with React/Angular reactive change detection. Verified in `tests/agent-page.test.js`.
-- [ ] **Task 5.6: Expand Sensitive Field Redaction Regex (`page.js`)**
+- [x] **Task 5.6: Expand Sensitive Field Redaction Regex (`page.js`)**
   - Expand redaction regex to cover Indian mobile patterns: `otp`, `pin`, `mpin`, `cvv`, `aadhaar`, `pan`, `password`, `secret` across `id`, `name`, `placeholder`, `aria-label`, and associated `<label>`.
+  - *Status:* **Completed.** Expanded redaction regex in `page.js` and `AssistantClient.java` to encompass Indian portal patterns (`mpin`, `aadhaar`, `pan`, `secret`, `otp`, `pin`, `cvv`) across `id`, `name`, `placeholder`, `aria-label`, and `<label>`. Verified in `tests/agent-page.test.js` and `AssistantClientTest.java`.
 - [ ] **Task 5.7: Add Semantic Anchor Fallbacks to Local Macros (`MacroStore.java` & `page.js`)**
   - Store and match accessible labels, aria-labels, and input placeholders alongside CSS selectors in `MacroStore` and `page.js` during replay.
 

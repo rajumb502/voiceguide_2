@@ -38,7 +38,7 @@ public final class AssistantClient {
     static boolean sensitive(JSONObject node) {
         return node.optBoolean("sensitive") || node.optString("type").matches("(?i)password|hidden|file")
             || (node.optString("autocomplete") + " " + node.optString("name") + " " + node.optString("label") + " " + node.optString("placeholder"))
-                .matches("(?is).*(?:password|one-time|otp|cc-|card.?number|cvv|\\bpin\\b).*");
+                .matches("(?is).*(?:password|one-time|otp|cc-|card.?number|cvv|\\bpin\\b|mpin|aadhaar|pan|secret).*");
     }
     static JSONObject schema() throws JSONException {
         JSONObject properties = new JSONObject();

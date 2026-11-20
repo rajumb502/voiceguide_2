@@ -67,7 +67,9 @@
   function sensitiveField(el) {
     return /password|hidden|file/i.test(el.getAttribute('type') || '') ||
       /one-time-code|cc-|current-password|new-password/i.test(el.getAttribute('autocomplete') || '') ||
-      /password|one.time|otp|card.?number|cvv|\bpin\b/i.test([label(el),el.getAttribute('name'),el.getAttribute('id')].join(' '));
+      /password|one.time|otp|card.?number|cvv|\bpin\b|mpin|aadhaar|pan|secret/i.test(
+        [label(el), el.getAttribute('name'), el.getAttribute('id'), el.getAttribute('placeholder'), el.getAttribute('aria-label')].join(' ')
+      );
   }
   function visible(el) {
     const r = el.getBoundingClientRect(), s = getComputedStyle(el);

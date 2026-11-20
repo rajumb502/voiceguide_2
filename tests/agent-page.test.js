@@ -43,5 +43,18 @@ for (const site of ['library.example','news.example']) {
   assert.equal(snapshot.nodes[0].placeholder,'[REDACTED]');
   assert.equal(snapshot.nodes[0].value,'[REDACTED]');
   assert.equal(JSON.stringify(snapshot).includes('do-not-upload'),false);
+
+  // Test Indian mobile patterns: MPIN, Aadhaar, PAN
+  for (const pattern of ['Enter MPIN', 'Aadhaar Number', 'PAN Card']) {
+    input.attributes.type = 'tel';
+    input.attributes.placeholder = pattern;
+    input.value = '987654321';
+    snapshot = JSON.parse(api.snapshot());
+    assert.equal(snapshot.sensitive, true, 'Failed for ' + pattern);
+    assert.equal(snapshot.nodes[0].sensitive, true);
+    assert.equal(snapshot.nodes[0].placeholder, '[REDACTED]');
+    assert.equal(snapshot.nodes[0].value, '[REDACTED]');
+    assert.equal(api.perform({action:'TYPE',target_id:id,text:'1234'},snapshot.revision,false), false);
+  }
 }
 console.log('Generic typing, form submission, redaction and blocked-field tests passed for two site fixtures');

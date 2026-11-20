@@ -71,7 +71,7 @@ public class AssistantClientTest {
         assertEquals("CLICK",AssistantClient.parse(AssistantSettings.GEMINI,response).getString("action"));
     }
     @Test public void sensitiveMetadataIsRedactedEvenWhenPageFlagIsWrong() throws Exception {
-        for (String metadata : new String[]{"password","one-time-code","otp","cc-number"}) {
+        for (String metadata : new String[]{"password","one-time-code","otp","cc-number","mpin","aadhaar","pan"}) {
             JSONObject payload = payload();
             payload.getJSONObject("snapshot").getJSONArray("nodes").getJSONObject(0).put("autocomplete",metadata).put("label","private-field-123456");
             for (String provider : new String[]{AssistantSettings.GEMINI,AssistantSettings.OPENAI}) {
