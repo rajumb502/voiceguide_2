@@ -1,50 +1,12 @@
-### P0 — Critical Real-World Blockers
-- [x] **Task 5.1: Activate `AccessibilityService` to Auto-Approve SMS User Consent Dialogs (`BackgroundVoiceService.java` & `SmsOtpHelper.java`)**
-  - Enable `canRetrieveWindowContent="true"` in `res/xml/accessibility_service_config.xml`.
-  - Set a short-lived `awaitingSmsConsent` flag in `SmsOtpHelper` when listening for an OTP.
-  - In `BackgroundVoiceService.onAccessibilityEvent()`, detect `TYPE_WINDOW_STATE_CHANGED` from `com.google.android.gms` containing the SMS consent prompt, locate the `"Allow"` node (`com.google.android.gms:id/positive_button` or text `"Allow"`), and click it automatically.
-  - Maintain mandatory `ActionSafetyGuard` hardware Volume Up double-press before entering OTP.
-  - *Status:* **Completed.** `accessibility_service_config.xml` updated with window state/content events; `SmsOtpHelper` tracks `isAwaitingSmsConsent()` with 5-minute timeout; `BackgroundVoiceService` inspects active window, locates `positive_button` / `"Allow"` node and auto-clicks. Verified in `BackgroundVoiceServiceTest.java`.
-- [x] **Task 5.2: Resolve Payment `<iframe>` Screenshot Suppression Conflict (`VoiceBrowserActivity.java` & `page.js`)**
-  - Allow consented screenshots when a tagged payment `<iframe>` is present on page while keeping main-document passwords and raw card inputs redacted/suppressed.
-  - Ensure `window.scrollY` / `window.scrollX` stability between snapshot capture and `dispatchCoordinateTap()`.
-  - *Status:* **Completed.** `page.js` tags `payment_frame` and keeps `sensitive` false for iframes unless actual password/PIN fields exist in main document; `AssistantClient.java` retains `payment_frame` iframe nodes in clean snapshot and sends screenshots for visual coordinate detection; `VoiceBrowserActivity.java` tracks scroll deltas to prevent tap misalignments across zoom/soft-keyboard popups. Verified in `AssistantClientTest.java`.
-- [x] **Task 5.3: Migrate Global Volume Key Interception to `AccessibilityService.onKeyEvent()` (`BackgroundVoiceService.java` & `res/xml/accessibility_service_config.xml`)**
-  - Add `android:canRequestFilterKeyEvents="true"` to `accessibility_service_config.xml` and request key filtering flag.
-  - Route volume key events via `BackgroundVoiceService` to `ActionSafetyGuard` so hardware confirmation works even if an external system dialog or payment bottom-sheet overlays the activity.
-  - Filter `repeatCount == 0` to preserve TalkBack's dual-volume 3-second hold shortcut.
-  - *Status:* **Completed.** Added `canRequestFilterKeyEvents="true"` and `flagRequestFilterKeyEvents` to `accessibility_service_config.xml`. Configured `FLAG_REQUEST_FILTER_KEY_EVENTS` dynamically in `BackgroundVoiceService.onServiceConnected()`. Implemented `onKeyEvent()` global delegation via `KeyEventListener` routing to `VoiceBrowserActivity.dispatchKeyEvent()` with `repeatCount == 0` filtering and volume-stream suppression. Verified in `BackgroundVoiceServiceTest.java`.
-
-### P1 — High-Priority Indian UX & Hardware Reality Fixes
-- [x] **Task 5.4: Guide Users Past Android 13+ "Restricted Settings" During Onboarding (`SettingsActivity.java`)**
-  - Detect when accessibility service activation is restricted on Android 13+ sideloaded builds.
-  - Speak step-by-step instructions and launch `Settings.ACTION_APPLICATION_DETAILS_SETTINGS` to direct users to "Allow restricted settings".
-  - *Status:* **Completed.** Detects Android 13+ (`Build.VERSION.SDK_INT >= 33`) with failed initial accessibility activation in `advanceSetup()`; speaks step-by-step guidance directing user to App Info top-right menu; automatically launches `Settings.ACTION_APPLICATION_DETAILS_SETTINGS` targeting package URI. Verified with `SettingsActivityTest.java`.
-- [x] **Task 5.5: Harden React / Angular Synthetic Input Dispatching (`page.js`)**
-  - Ensure native prototype property descriptors (`HTMLInputElement.prototype.value.set`) and bubbling `input`, `change`, and `blur` events are dispatched for input fields.
-  - *Status:* **Completed.** Centralized input dispatching in `dispatchNativeInput()` using `Object.getOwnPropertyDescriptor(proto, 'value').set.call(el, text)` across `TYPE`, `enterOtp()`, and `executeMacroStep()`. Dispatches full bubbling synthetic event cascade (`input`, `change`, and `blur`) ensuring full compatibility with React/Angular reactive change detection. Verified in `tests/agent-page.test.js`.
-- [x] **Task 5.6: Expand Sensitive Field Redaction Regex (`page.js`)**
-  - Expand redaction regex to cover Indian mobile patterns: `otp`, `pin`, `mpin`, `cvv`, `aadhaar`, `pan`, `password`, `secret` across `id`, `name`, `placeholder`, `aria-label`, and associated `<label>`.
-  - *Status:* **Completed.** Expanded redaction regex in `page.js` and `AssistantClient.java` to encompass Indian portal patterns (`mpin`, `aadhaar`, `pan`, `secret`, `otp`, `pin`, `cvv`) across `id`, `name`, `placeholder`, `aria-label`, and `<label>`. Verified in `tests/agent-page.test.js` and `AssistantClientTest.java`.
-- [ ] **Task 5.7: Add Semantic Anchor Fallbacks to Local Macros (`MacroStore.java` & `page.js`)**
-  - Store and match accessible labels, aria-labels, and input placeholders alongside CSS selectors in `MacroStore` and `page.js` during replay.
-
-### P2 — Documentation, Cleanup & Physical Device Validation
-- [ ] **Task 5.8: Sync `README.md` with Completed Phases 1–4 (`tasks.md`)**
-  - Document Volume Up double-press hardware confirmation, Audio Landmark Briefs, SMS User Consent auto-read, Encrypted Local Macros, and AccessibilityService integration.
-- [ ] **Task 5.9: Archive Unused Prototype Files (`backend/server.py`)**
-  - Move legacy `backend/server.py` to `prototypes/` or document its archival.
-- [ ] **Task 5.10: Document Physical Device Verification Suite Checklist (With TalkBack Enabled)**
-  - Document step-by-step manual test protocols for TalkBack coexistence, Wikipedia landmark brief, BESCOM React billing portal, and GMS SMS sheet auto-click.
-
 ## P0 / P1 — Post-Muse Industry Hardening (Prevent Cross-App Leaks & OS Permission Blocks)
 *Context: Following recent industry investigations into AI agents (e.g., Meta Muse) accidentally scraping encrypted messengers via broad Accessibility/Notification permissions and executing unauthorized transactions, Apple and Google are tightening OS-level AI agent guardrails. Add these defensive boundaries to stay Play-Store compliant and user-safe.*
 
-- [ ] **11. Enforce Sensitive App & Package Denylist (`BackgroundVoiceService.java` & `SharingConsent.java`)**
+- [x] **11. Enforce Sensitive App & Package Denylist (`BackgroundVoiceService.java` & `SharingConsent.java`)**
   - **Why:** Encrypted messengers (Signal, WhatsApp) and Indian banking/UPI apps (SBI YONO, HDFC, PhonePe, Google Pay) must never be scraped or screenshotted by default via `AccessibilityService` or `NotificationListener`.
   - **Action:**
     - Maintain a default-blocked package denylist (`org.thoughtcrime.securesms`, `com.whatsapp`, `com.phonepe.app`, `com.google.android.apps.nbu.paisa.user`, `net.one97.paytm`, `com.sbi.lotusintouch`, etc.) that immediately aborts `onAccessibilityEvent()` inspection and screenshot capture.
     - Respect `WindowManager.LayoutParams.FLAG_SECURE` signals by never attempting workarounds on flagged windows.
+  - **Status:** **Completed.** Defined `SharingConsent.BLOCKED_PACKAGES` denylist and `isPackageBlocked(pkg)`. Enforced immediate event abort in `BackgroundVoiceService.onAccessibilityEvent()` when any denylisted package is received. Verified in `BackgroundVoiceServiceTest.java`.
 
 - [ ] **12. Bound `AccessibilityService` Window Inspection to Short User-Initiated Windows (`BackgroundVoiceService.java`)**
   - **Why:** Always-on background window polling across third-party apps triggers Google Play Accessibility policy rejections and OS-level permission revocation.

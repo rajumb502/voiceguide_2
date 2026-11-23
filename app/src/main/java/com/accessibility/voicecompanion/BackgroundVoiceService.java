@@ -54,6 +54,11 @@ public class BackgroundVoiceService extends AccessibilityService {
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
         if (event == null) return;
+        CharSequence pkg = event.getPackageName();
+        if (pkg != null && SharingConsent.isPackageBlocked(pkg.toString())) {
+            // Immediate abort for denylisted sensitive packages (messengers, banking/UPI)
+            return;
+        }
         if (SmsOtpHelper.isAwaitingSmsConsent()) {
             handleSmsConsentDialog(event);
         }

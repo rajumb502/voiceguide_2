@@ -76,4 +76,25 @@ public class BackgroundVoiceServiceTest {
         boolean fallback = service.onKeyEvent(event);
         assertFalse(fallback);
     }
+
+    @Test
+    public void testSensitiveAppDenylistAbortsEvent() {
+        SmsOtpHelper.setAwaitingSmsConsent(true);
+
+        for (String blockedPkg : SharingConsent.BLOCKED_PACKAGES) {
+            assertTrue(SharingConsent.isPackageBlocked(blockedPkg));
+
+            AccessibilityEvent event = AccessibilityEvent.obtain();
+            event.setEventType(AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED);
+            event.setPackageName(blockedPkg);
+
+            service.onAccessibilityEvent(event);
+            // Flag should remain untouched because event was immediately dropped
+            assertTrue(SmsOtpHelper.isAwaitingSmsConsent());
+            event.recycle();
+        }
+
+        assertFalse(SharingConsent.isPackageBlocked("com.google.android.gms"));
+        assertFalse(SharingConsent.isPackageBlocked("com.example.accessiblebrowser"));
+    }
 }

@@ -1,6 +1,8 @@
 package com.accessibility.voicecompanion;
 
 import java.net.IDN;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.Locale;
 import java.util.Set;
 import java.util.TreeSet;
@@ -9,6 +11,34 @@ import java.util.TreeSet;
 public final class SharingConsent {
     public enum Status { ALLOWED, DECLINED, UNCLEAR, EXPIRED }
     public record Reply(Status status, String command) {}
+
+    /**
+     * Default-blocked sensitive packages: encrypted messengers and Indian banking/UPI apps.
+     * These must never be scraped or screenshotted.
+     */
+    public static final Set<String> BLOCKED_PACKAGES;
+    static {
+        Set<String> set = new HashSet<>();
+        set.add("org.thoughtcrime.securesms");             // Signal
+        set.add("com.whatsapp");                            // WhatsApp
+        set.add("com.phonepe.app");                         // PhonePe
+        set.add("com.google.android.apps.nbu.paisa.user");  // Google Pay (Tez)
+        set.add("net.one97.paytm");                         // Paytm
+        set.add("com.sbi.lotusintouch");                    // SBI YONO
+        set.add("in.org.npci.upiapp");                      // BHIM UPI
+        set.add("com.hdfcbank.payzapp");                    // HDFC PayZapp
+        set.add("com.snapwork.hdfc");                       // HDFC MobileBanking
+        set.add("com.icicibank.mobile");                    // ICICI iMobile
+        set.add("com.axis.mobile");                         // Axis Mobile
+        BLOCKED_PACKAGES = Collections.unmodifiableSet(set);
+    }
+
+    public static boolean isPackageBlocked(String packageName) {
+        if (packageName == null) return false;
+        String pkg = packageName.trim().toLowerCase(Locale.ROOT);
+        return BLOCKED_PACKAGES.contains(pkg);
+    }
+
     private String command;
     private String domain, provider, allowedDomain, allowedProvider;
     private long allowedNavigation = -1;
