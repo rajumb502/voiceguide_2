@@ -20,7 +20,7 @@ import java.util.regex.Pattern;
  */
 public class SmsOtpHelper {
     public static final int SMS_CONSENT_REQUEST_CODE = 2001;
-    public static final long CONSENT_TIMEOUT_MS = 5 * 60 * 1000L; // 5 minutes
+    public static final long CONSENT_TIMEOUT_MS = 60 * 1000L; // 60 seconds bounded window
 
     private static volatile boolean awaitingSmsConsent = false;
     private static volatile long awaitingConsentTimestamp = 0;

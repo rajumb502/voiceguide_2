@@ -41,6 +41,9 @@ public class BackgroundVoiceServiceTest {
 
         SmsOtpHelper.setAwaitingSmsConsent(false);
         assertFalse(SmsOtpHelper.isAwaitingSmsConsent());
+        
+        // Bounded window expiry: verify 60,000ms boundary
+        assertEquals(60000L, SmsOtpHelper.CONSENT_TIMEOUT_MS);
     }
 
     @Test
