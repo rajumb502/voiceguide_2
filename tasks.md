@@ -66,10 +66,11 @@
     - Reinforce the `AssistantClient` system prompt rule: *"Never state account balances, bill amounts, or booking confirmations unless explicitly present in the current page's live DOM snapshot."*
   - **Status:** **Completed.** Reinforced `AssistantClient.INSTRUCTIONS` to strictly prohibit stating balances, bill amounts, or booking confirmations unless present in live DOM snapshot. Verified zero cross-site memory leakage in `ConversationMemoryTest.java` and `HostChecksTest`.
 
-- [ ] **14. Prepare Google Play Accessibility Declaration Artifacts (`docs/play_store_accessibility.md`)**
+- [x] **14. Prepare Google Play Accessibility Declaration Artifacts (`docs/play_store_accessibility.md`)**
   - **Why:** Google Play requires strict proof that `AccessibilityService` is used solely to assist users with disabilities—not for covert data collection.
   - **Action:**
     - Document the exact bounded scope (GMS SMS User Consent auto-approval + hardware Volume Up confirmation), per-domain explicit spoken consent, and hardware double-press financial gating for Play Console review.
+  - **Status:** **Completed.** Formulated comprehensive Google Play Store declaration artifact in `docs/play_store_accessibility.md` covering prominent in-app disclosures, bounded SMS consent dialog automation, ActionSafetyGuard hardware key filtering, anti-scraping guarantees, and Play Console review questions.
 
 ---
 
