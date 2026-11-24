@@ -3,6 +3,7 @@ package com.accessibility.voicecompanion;
 import android.accessibilityservice.AccessibilityService;
 import android.accessibilityservice.AccessibilityServiceInfo;
 import android.os.Build;
+import android.os.SystemClock;
 import android.view.KeyEvent;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
@@ -10,8 +11,9 @@ import java.util.List;
 
 /**
  * Accessibility service for assisting visually impaired users with system dialogs
- * such as auto-approving Google Play Services SMS User Consent prompts, and global
- * key event filtering for hardware ActionSafetyGuard confirmations.
+ * such as auto-approving Google Play Services SMS User Consent prompts, global
+ * key event filtering for hardware ActionSafetyGuard confirmations, and on-demand
+ * native app interactions.
  */
 public class BackgroundVoiceService extends AccessibilityService {
 
@@ -20,6 +22,8 @@ public class BackgroundVoiceService extends AccessibilityService {
     }
 
     private static volatile KeyEventListener activeKeyEventListener;
+    private static volatile boolean userTriggeredSessionActive = false;
+    private static volatile BackgroundVoiceService sharedServiceInstance;
 
     public static void setKeyEventListener(KeyEventListener listener) {
         activeKeyEventListener = listener;
@@ -29,9 +33,22 @@ public class BackgroundVoiceService extends AccessibilityService {
         return activeKeyEventListener;
     }
 
+    public static void setUserTriggeredSessionActive(boolean active) {
+        userTriggeredSessionActive = active;
+    }
+
+    public static boolean isUserTriggeredSessionActive() {
+        return userTriggeredSessionActive;
+    }
+
+    public static BackgroundVoiceService getSharedInstance() {
+        return sharedServiceInstance;
+    }
+
     @Override
     protected void onServiceConnected() {
         super.onServiceConnected();
+        sharedServiceInstance = this;
         AccessibilityServiceInfo info = getServiceInfo();
         if (info == null) {
             info = new AccessibilityServiceInfo();
@@ -39,6 +56,14 @@ public class BackgroundVoiceService extends AccessibilityService {
         info.flags |= AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS;
         info.flags |= AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS;
         setServiceInfo(info);
+    }
+
+    @Override
+    public void onDestroy() {
+        if (sharedServiceInstance == this) {
+            sharedServiceInstance = null;
+        }
+        super.onDestroy();
     }
 
     @Override
@@ -54,13 +79,29 @@ public class BackgroundVoiceService extends AccessibilityService {
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
         if (event == null) return;
-        CharSequence pkg = event.getPackageName();
-        if (pkg != null && SharingConsent.isPackageBlocked(pkg.toString())) {
-            // Immediate abort for denylisted sensitive packages (messengers, banking/UPI)
+        CharSequence pkgSeq = event.getPackageName();
+        String pkg = pkgSeq != null ? pkgSeq.toString() : null;
+
+        // Immediate abort for permanently blocked sensitive packages (banking/UPI)
+        if (pkg != null && SharingConsent.isPackageBlocked(pkg)) {
             return;
         }
+
+        // Bounded SMS User Consent auto-approval takes precedence for GMS prompts
         if (SmsOtpHelper.isAwaitingSmsConsent()) {
-            handleSmsConsentDialog(event);
+            if (handleSmsConsentDialog(event)) {
+                return;
+            }
+        }
+
+        // Zero Background Scraping: Ignore all other events unless an active user session is ongoing
+        // and the package is explicitly allowed in SharingConsent
+        if (!userTriggeredSessionActive) {
+            return;
+        }
+
+        if (pkg != null && !SharingConsent.isPackageAllowed(pkg)) {
+            return;
         }
     }
 

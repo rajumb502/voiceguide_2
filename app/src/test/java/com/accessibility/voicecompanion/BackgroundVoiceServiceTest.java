@@ -24,12 +24,16 @@ public class BackgroundVoiceServiceTest {
         service = new BackgroundVoiceService();
         SmsOtpHelper.setAwaitingSmsConsent(false);
         BackgroundVoiceService.setKeyEventListener(null);
+        BackgroundVoiceService.setUserTriggeredSessionActive(false);
+        SharingConsent.clearAllowedPackages();
     }
 
     @After
     public void tearDown() {
         SmsOtpHelper.setAwaitingSmsConsent(false);
         BackgroundVoiceService.setKeyEventListener(null);
+        BackgroundVoiceService.setUserTriggeredSessionActive(false);
+        SharingConsent.clearAllowedPackages();
     }
 
     @Test
@@ -99,5 +103,29 @@ public class BackgroundVoiceServiceTest {
 
         assertFalse(SharingConsent.isPackageBlocked("com.google.android.gms"));
         assertFalse(SharingConsent.isPackageBlocked("com.example.accessiblebrowser"));
+    }
+
+    @Test
+    public void testZeroBackgroundScrapingEnforcement() {
+        // When session is NOT active, events are ignored even for benign apps
+        BackgroundVoiceService.setUserTriggeredSessionActive(false);
+        AccessibilityEvent event = AccessibilityEvent.obtain();
+        event.setEventType(AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED);
+        event.setPackageName("com.whatsapp");
+
+        service.onAccessibilityEvent(event);
+        assertFalse(BackgroundVoiceService.isUserTriggeredSessionActive());
+
+        // When session IS active, but package is not allowed, still ignored
+        BackgroundVoiceService.setUserTriggeredSessionActive(true);
+        assertFalse(SharingConsent.isPackageAllowed("com.whatsapp"));
+        service.onAccessibilityEvent(event);
+
+        // When session IS active and package IS allowed
+        SharingConsent.setPackageAllowed("com.whatsapp", true);
+        assertTrue(SharingConsent.isPackageAllowed("com.whatsapp"));
+        service.onAccessibilityEvent(event);
+
+        event.recycle();
     }
 }

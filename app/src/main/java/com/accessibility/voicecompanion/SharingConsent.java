@@ -4,8 +4,10 @@ import java.net.IDN;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.concurrent.ConcurrentHashMap;
 
 /** Consent replies are interpreted locally, never by a remote model. */
 public final class SharingConsent {
@@ -13,14 +15,11 @@ public final class SharingConsent {
     public record Reply(Status status, String command) {}
 
     /**
-     * Default-blocked sensitive packages: encrypted messengers and Indian banking/UPI apps.
-     * These must never be scraped or screenshotted.
+     * Strict Indian banking and UPI apps that can NEVER be shared with remote AI.
      */
-    public static final Set<String> BLOCKED_PACKAGES;
+    public static final Set<String> STRICT_BANKING_PACKAGES;
     static {
         Set<String> set = new HashSet<>();
-        set.add("org.thoughtcrime.securesms");             // Signal
-        set.add("com.whatsapp");                            // WhatsApp
         set.add("com.phonepe.app");                         // PhonePe
         set.add("com.google.android.apps.nbu.paisa.user");  // Google Pay (Tez)
         set.add("net.one97.paytm");                         // Paytm
@@ -30,13 +29,100 @@ public final class SharingConsent {
         set.add("com.snapwork.hdfc");                       // HDFC MobileBanking
         set.add("com.icicibank.mobile");                    // ICICI iMobile
         set.add("com.axis.mobile");                         // Axis Mobile
-        BLOCKED_PACKAGES = Collections.unmodifiableSet(set);
+        STRICT_BANKING_PACKAGES = Collections.unmodifiableSet(set);
+    }
+
+    /**
+     * Default-blocked sensitive packages: permanently blocked banking/UPI apps.
+     */
+    public static final Set<String> BLOCKED_PACKAGES = STRICT_BANKING_PACKAGES;
+
+    public static boolean isBankingPackage(String packageName) {
+        if (packageName == null) return false;
+        String pkg = packageName.trim().toLowerCase(Locale.ROOT);
+        return STRICT_BANKING_PACKAGES.contains(pkg);
     }
 
     public static boolean isPackageBlocked(String packageName) {
-        if (packageName == null) return false;
+        return isBankingPackage(packageName);
+    }
+
+    public static String getBankingSecurityWarning(String packageName) {
+        if (isBankingPackage(packageName)) {
+            return "Banking and payment apps cannot be shared with AI providers for your financial security.";
+        }
+        return null;
+    }
+
+    // Per-provider package allowlists backed by KeystoreCryptoHelper
+    private static final Map<String, Set<String>> ALLOWED_PACKAGES = new ConcurrentHashMap<>();
+    private static volatile String activeProvider = AssistantSettings.GEMINI;
+
+    public static void setActiveProvider(String provider) {
+        if (provider != null && !provider.isEmpty()) activeProvider = provider;
+    }
+
+    public static String getActiveProvider() {
+        return activeProvider;
+    }
+
+    public static boolean isPackageAllowed(String provider, String packageName) {
+        if (packageName == null || isBankingPackage(packageName)) return false;
         String pkg = packageName.trim().toLowerCase(Locale.ROOT);
-        return BLOCKED_PACKAGES.contains(pkg);
+        String prov = (provider != null && !provider.isEmpty()) ? provider : activeProvider;
+        Set<String> set = ALLOWED_PACKAGES.get(prov);
+        return set != null && set.contains(pkg);
+    }
+
+    public static boolean isPackageAllowed(String packageName) {
+        return isPackageAllowed(activeProvider, packageName);
+    }
+
+    public static void setPackageAllowed(String provider, String packageName, boolean allowed) {
+        if (packageName == null) return;
+        String pkg = packageName.trim().toLowerCase(Locale.ROOT);
+        if (allowed && isBankingPackage(pkg)) {
+            throw new SecurityException("Banking and payment apps cannot be shared with AI providers for your financial security: " + pkg);
+        }
+        String prov = (provider != null && !provider.isEmpty()) ? provider : activeProvider;
+        Set<String> set = ALLOWED_PACKAGES.computeIfAbsent(prov, k -> ConcurrentHashMap.newKeySet());
+        if (allowed) {
+            set.add(pkg);
+        } else {
+            set.remove(pkg);
+        }
+        persistAllowlist(prov);
+    }
+
+    public static void setPackageAllowed(String packageName, boolean allowed) {
+        setPackageAllowed(activeProvider, packageName, allowed);
+    }
+
+    public static Set<String> getAllowedPackages(String provider) {
+        String prov = (provider != null && !provider.isEmpty()) ? provider : activeProvider;
+        Set<String> set = ALLOWED_PACKAGES.get(prov);
+        return set != null ? Collections.unmodifiableSet(new TreeSet<>(set)) : Collections.emptySet();
+    }
+
+    public static Set<String> getAllowedPackages() {
+        return getAllowedPackages(activeProvider);
+    }
+
+    public static void clearAllowedPackages() {
+        ALLOWED_PACKAGES.clear();
+    }
+
+    public static String getAppConsentPrompt(String appName, String provider) {
+        String prov = (provider != null && !provider.isEmpty()) ? provider : activeProvider;
+        return "Allow sharing screen details from " + appName + " with " + prov + "? Say Yes or No";
+    }
+
+    private static void persistAllowlist(String provider) {
+        try {
+            Set<String> set = ALLOWED_PACKAGES.getOrDefault(provider, Collections.emptySet());
+            String raw = String.join(",", set);
+            KeystoreCryptoHelper.encrypt("package_allowlist_" + provider, raw);
+        } catch (Exception ignored) {}
     }
 
     private String command;

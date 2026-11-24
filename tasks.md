@@ -77,35 +77,41 @@
 ## Phase 6: Controlled Local App Interfacing & Accessibility Driver (P2 — Cross-App Assistance)
 *Goal: Allow visually impaired users to summarize and navigate explicitly approved Android apps (e.g., WhatsApp, Contacts, Settings) on demand, even with system notifications disabled—while enforcing strict opt-in consent, zero background scraping, and safe handoffs on banking/UPI screens.*
 
-- [ ] **Task 6.1: Per-App Allowlist Storage & Consent UI (`SharingConsent.java` & `SettingsActivity.java`)**
+- [x] **Task 6.1: Per-App Allowlist Storage & Consent UI (`SharingConsent.java` & `SettingsActivity.java`)**
   - Extend `SharingConsent` (backed by `KeystoreCryptoHelper`) with per-package approval methods (`isPackageAllowed(String pkg)`, `setPackageAllowed(String pkg, boolean allowed)`, `getAllowedPackages()`), isolated per LLM provider (`Gemini` vs `OpenAI`).
   - Default every installed package to **Denied (`false`)**; exclude strict Indian banking/UPI packages (`com.phonepe.app`, `com.google.android.apps.nbu.paisa.user`, `net.one97.paytm`, `in.org.npci.upiapp`, `com.sbi.lotusintouch`) from automatic suggestion with a spoken security warning.
   - Add an **"Allowed Apps" Consent Screen** in `SettingsActivity` (accessible via both TalkBack UI toggles and voice commands like *"Allow WhatsApp"* / *"Revoke WhatsApp"*), plus an in-flow spoken prompt if the user asks to read an unapproved app (*"Allow sharing screen details from WhatsApp with [Provider]? Say Yes or No"*).
+  - *Status:* **Completed.** `SharingConsent` updated with provider-isolated package allowlists, default-denied behavior, and permanent banking exclusion. `AssistantSettings` and `SettingsActivity` expose TalkBack UI input and voice command toggles (*"Allow WhatsApp"*, *"Revoke WhatsApp"*). Verified in `SharingConsentUnitTest.java`.
 
-- [ ] **Task 6.2: Activate Event-Driven `BackgroundVoiceService` & Global Volume Keys (`BackgroundVoiceService.java` & `res/xml/accessibility_service_config.xml`)**
+- [x] **Task 6.2: Activate Event-Driven `BackgroundVoiceService` & Global Volume Keys (`BackgroundVoiceService.java` & `res/xml/accessibility_service_config.xml`)**
   - Enable `android:canRetrieveWindowContent="true"` and `android:canRequestFilterKeyEvents="true"` in the Accessibility Service XML config, and set `AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS` at runtime.
   - Enforce **Zero Background Scraping**: `BackgroundVoiceService` must immediately return and ignore `onAccessibilityEvent()` whenever `isUserTriggeredSessionActive` is `false` or `!SharingConsent.isPackageAllowed(packageName)` (except during bounded `60,000ms` SMS consent approval).
   - Route global `onKeyEvent()` Volume Up/Down presses through `ActionSafetyGuard` (`1,200ms` double-press confirmation, `repeatCount == 0` guard, preserving the 3-second dual-volume TalkBack shortcut) so confirmations work even when external apps or system dialogs are in the foreground.
   - Update `SettingsActivity.guideSetup()` to detect Android 13+ **"Restricted Settings"** locks on sideloaded APKs and speak step-by-step instructions to enable *"Allow restricted settings"* in App Info.
+  - *Status:* **Completed.** `BackgroundVoiceService` enforces `isUserTriggeredSessionActive` gate and package approval check on every accessibility event. Volume keys routed via `KeyEventListener` with repeat filtering. Verified in `BackgroundVoiceServiceTest.java`.
 
-- [ ] **Task 6.3: Auto-Approve SMS User Consent Bottom Sheet (`BackgroundVoiceService.java` & `SmsOtpHelper.java`)**
+- [x] **Task 6.3: Auto-Approve SMS User Consent Bottom Sheet (`BackgroundVoiceService.java` & `SmsOtpHelper.java`)**
   - Add a bounded `awaitingSmsConsent` window (`60,000ms` auto-expiry) in `SmsOtpHelper` when `startSmsUserConsent()` is active.
   - When `BackgroundVoiceService` receives `TYPE_WINDOW_STATE_CHANGED` from `com.google.android.gms` matching the SMS consent prompt, locate the `"Allow"` node (`com.google.android.gms:id/positive_button` or text `"Allow"`) and execute `performAction(AccessibilityNodeInfo.ACTION_CLICK)` so blind users never have to hunt for the visual bottom-sheet button.
   - Keep `ActionSafetyGuard` **Volume Up double-press** mandatory before speaking/entering the retrieved OTP.
+  - *Status:* **Completed.** Bounded 60s window auto-clicks GMS positive consent button, auto-expires on timeout, and requires hardware Volume Up double-press prior to OTP entry. Verified in `BackgroundVoiceServiceTest.java` and `IndianAccessibilityTest.java`.
 
-- [ ] **Task 6.4: On-Demand Native App UI Tree Driver (`NativeAppDriver.java` & `AgentSession.java`)**
+- [x] **Task 6.4: On-Demand Native App UI Tree Driver (`NativeAppDriver.java` & `AgentSession.java`)**
   - Implement `NativeAppDriver` plugged into the existing decoupled `AgentSession` loop, mirroring `page.js` capabilities for native Android apps:
     - **Snapshot:** Traverse `getRootInActiveWindow()` (`AccessibilityNodeInfo`) up to 150 visible nodes, extracting `text`, `contentDescription`, `viewIdResourceName`, `className`, `isClickable`, `isEditable`, `isScrollable`, and `boundsInScreen`.
     - **Sensitive Field Masking:** Mask `node.isPassword()` and any text/ID matching `/otp|pin|mpin|cvv|aadhaar|pan|password|secret/i` as `"[REDACTED]"`.
     - **Actions:** Support `CLICK` (`ACTION_CLICK` walking up clickable parents, with `dispatchGesture()` coordinate fallback via `boundsInScreen`), `TYPE` (`ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE`), `SCROLL` (`ACTION_SCROLL_FORWARD` / `ACTION_SCROLL_BACKWARD`), and `BACK` (`performGlobalAction(GLOBAL_ACTION_BACK)`).
   - Gate high-stakes native UI actions (`Send`, `Pay`, `Transfer`, `Delete`, `Call`) behind `ActionSafetyGuard` Volume Up double-press.
+  - *Status:* **Completed.** `NativeAppDriver.java` implements node extraction (up to 150 nodes), sensitive field redaction, `CLICK` with gesture coordinate fallback, `TYPE` via `ACTION_SET_TEXT`, `SCROLL`, and `BACK`. High-stakes action gating integrated with `ActionSafetyGuard`. Verified in `NativeAppDriverTest.java`.
 
-- [ ] **Task 6.5: Android Share-Sheet Receiver & Safe Banking / UPI Handoffs (`VoiceBrowserActivity.java` & `NativeAppDriver.java`)**
+- [x] **Task 6.5: Android Share-Sheet Receiver & Safe Banking / UPI Handoffs (`VoiceBrowserActivity.java` & `NativeAppDriver.java`)**
   - Register an `ACTION_SEND` (`text/plain`) intent filter so users can also share exported WhatsApp `.txt` chats or articles directly to Voice Companion for zero-accessibility summarization.
   - **Banking / `FLAG_SECURE` Handoff:** Detect empty/blocked node trees or all-black bitmaps (`FLAG_SECURE`), drop image uploads automatically, speak *"This screen restricts screen reading for security"*, and pause AI automation at NPCI UPI PIN screens.
   - Add a **"Pause assistant for banking"** voice command that calls `BackgroundVoiceService.disableSelf()` (API 24+) so strict bank RASP checks (e.g., SBI YONO) do not block the user at launch.
+  - *Status:* **Completed.** `AndroidManifest.xml` registered with `ACTION_SEND` (`text/plain`), handled via `handleSharedText()`. Banking and `FLAG_SECURE` detection incorporated into `NativeAppDriver`. Added *"Pause assistant for banking"* voice command calling `BackgroundVoiceService.disableSelf()`. Verified in unit tests.
 
-- [ ] **Task 6.6: Phase 5 Verification Tests (`NativeAppDriverTest.java` & `BackgroundVoiceServiceTest.java`)**
+- [x] **Task 6.6: Phase 5 Verification Tests (`NativeAppDriverTest.java` & `BackgroundVoiceServiceTest.java`)**
   - Unit-test `SharingConsent` package allowlist defaults (all `false`), provider isolation, and banking package warnings.
   - Verify `BackgroundVoiceService` drops `AccessibilityEvent`s when `isUserTriggeredSessionActive == false` or when an unapproved package is active, and expires `awaitingSmsConsent` after `60,001ms`.
   - Verify `NativeAppDriver` serializes mock `AccessibilityNodeInfo` trees (including WhatsApp-style message lists), redacts `isPassword()`/OTP nodes, and triggers `ActionSafetyGuard` before clicking a `"Send"` button.
+  - *Status:* **Completed.** Added `NativeAppDriverTest.java`, updated `BackgroundVoiceServiceTest.java`, and expanded `SharingConsentUnitTest.java`. All JVM unit tests pass deterministically.

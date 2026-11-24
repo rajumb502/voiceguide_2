@@ -6,6 +6,8 @@ import org.junit.runner.RunWith;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.annotation.Config;
 
+import java.util.Set;
+
 import static org.junit.Assert.*;
 
 @RunWith(RobolectricTestRunner.class)
@@ -16,6 +18,8 @@ public class SharingConsentUnitTest {
     @Before
     public void setUp() {
         consent = new SharingConsent();
+        SharingConsent.clearAllowedPackages();
+        SharingConsent.setActiveProvider(AssistantSettings.GEMINI);
     }
 
     @Test
@@ -60,6 +64,42 @@ public class SharingConsentUnitTest {
             assertEquals(SharingConsent.Status.DECLINED, reply.status());
             assertFalse(consent.allows("bescom.karnataka.gov.in", "Gemini", 1));
             assertFalse(consent.pending());
+        }
+    }
+
+    @Test
+    public void testPackageAllowlistDefaultsAndProviderIsolation() {
+        // Defaults to denied (false) for any package
+        assertFalse(SharingConsent.isPackageAllowed("com.whatsapp"));
+        assertFalse(SharingConsent.isPackageAllowed(AssistantSettings.GEMINI, "com.whatsapp"));
+        assertFalse(SharingConsent.isPackageAllowed(AssistantSettings.OPENAI, "com.whatsapp"));
+
+        // Allow WhatsApp for Gemini
+        SharingConsent.setPackageAllowed(AssistantSettings.GEMINI, "com.whatsapp", true);
+        assertTrue(SharingConsent.isPackageAllowed(AssistantSettings.GEMINI, "com.whatsapp"));
+        // OpenAI must still be isolated and false
+        assertFalse(SharingConsent.isPackageAllowed(AssistantSettings.OPENAI, "com.whatsapp"));
+
+        // Revoke WhatsApp
+        SharingConsent.setPackageAllowed(AssistantSettings.GEMINI, "com.whatsapp", false);
+        assertFalse(SharingConsent.isPackageAllowed(AssistantSettings.GEMINI, "com.whatsapp"));
+    }
+
+    @Test
+    public void testBankingPackagesPermanentlyBlockedWithWarning() {
+        for (String bankingPkg : SharingConsent.STRICT_BANKING_PACKAGES) {
+            assertTrue(SharingConsent.isBankingPackage(bankingPkg));
+            assertTrue(SharingConsent.isPackageBlocked(bankingPkg));
+            assertNotNull(SharingConsent.getBankingSecurityWarning(bankingPkg));
+
+            // Attempting to allow banking package throws SecurityException
+            try {
+                SharingConsent.setPackageAllowed(bankingPkg, true);
+                fail("Expected SecurityException when allowing banking package: " + bankingPkg);
+            } catch (SecurityException expected) {
+                // Expected
+            }
+            assertFalse(SharingConsent.isPackageAllowed(bankingPkg));
         }
     }
 }

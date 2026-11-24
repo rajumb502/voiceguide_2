@@ -170,6 +170,7 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
         root.addView(web, new LinearLayout.LayoutParams(-1, 0, 1));
         setContentView(root);
         open("https://en.m.wikipedia.org");
+        handleIncomingIntent(getIntent());
     }
 
     private void speakAudioLandmarkBrief(WebView view, String url) {
@@ -398,7 +399,37 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
         if (!url.contains(":")) url = "https://" + url;
         if (isWebUrl(url)) web.loadUrl(url); else if (voice != null) voice.speak("Please enter an HTTP or HTTPS website address.");
     }
-    @Override protected void onNewIntent(Intent intent) { super.onNewIntent(intent); if (intent.getData() != null) open(intent.getData().toString()); }
+
+    @Override protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        handleIncomingIntent(intent);
+    }
+
+    void handleIncomingIntent(Intent intent) {
+        if (intent == null) return;
+        if (Intent.ACTION_SEND.equals(intent.getAction()) && "text/plain".equals(intent.getType())) {
+            String sharedText = intent.getStringExtra(Intent.EXTRA_TEXT);
+            if (sharedText != null && !sharedText.trim().isEmpty()) {
+                handleSharedText(sharedText.trim());
+                return;
+            }
+        }
+        if (intent.getData() != null) open(intent.getData().toString());
+    }
+
+    void handleSharedText(String text) {
+        if (text == null || text.trim().isEmpty()) return;
+        if (isWebUrl(text.trim())) {
+            open(text.trim());
+            return;
+        }
+        String preview = text.length() > 200 ? text.substring(0, 200) + "…" : text;
+        status.setText("Received shared text: " + preview);
+        if (voice != null) {
+            voice.speak("Shared text received: " + text);
+        }
+    }
+
     private void listen() {
         if (agent.running() && !sharing.pending()) {
             agent.ask(); requestId++; busy = false; agentActing = false;
@@ -456,6 +487,16 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
             else if (reply.status() == SharingConsent.Status.UNCLEAR) {
                 if (!localCommand(text) && voice != null) voice.ask("Say yes to remember this site's sharing approval for " + settings.provider() + ", or no to stay local. You can remove approvals in Settings.",locale);
             } else { cancel(); if (voice != null) voice.speak("Page sharing cancelled or expired. Local reading and navigation are available."); }
+            return;
+        }
+        if (VoiceCommands.normalize(text).matches(".*(pause assistant for banking|disable accessibility for banking|pause for banking).*")) {
+            BackgroundVoiceService service = BackgroundVoiceService.getSharedInstance();
+            if (service != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                service.disableSelf();
+                if (voice != null) voice.speak("Assistant paused for banking. You can re-enable it in Accessibility Settings after your banking session.");
+            } else {
+                if (voice != null) voice.speak("Please temporarily turn off Voice Companion in Android Accessibility Settings while using banking apps.");
+            }
             return;
         }
         if (preferenceCommand(text)) return;

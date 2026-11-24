@@ -27,6 +27,13 @@ public final class AssistantSettings {
             }
         }
         prefs = p;
+        for (String pkg : approvedPackages(GEMINI)) {
+            try { SharingConsent.setPackageAllowed(GEMINI, pkg, true); } catch (Exception ignored) {}
+        }
+        for (String pkg : approvedPackages(OPENAI)) {
+            try { SharingConsent.setPackageAllowed(OPENAI, pkg, true); } catch (Exception ignored) {}
+        }
+        SharingConsent.setActiveProvider(provider());
     }
     static synchronized void migrate(SharedPreferences legacy, SharedPreferences encrypted) {
         SharedPreferences.Editor editor = encrypted.edit();
@@ -60,6 +67,31 @@ public final class AssistantSettings {
         SharedPreferences.Editor editor = prefs.edit().putBoolean(provider + ".share_all_sites",allSites);
         editor.putStringSet(provider + ".approved_sites",new TreeSet<>(sites));
         if (!editor.commit()) throw new IllegalStateException("Could not save site approvals.");
+    }
+    public Set<String> approvedPackages(String provider) {
+        return new TreeSet<>(prefs.getStringSet(provider + ".approved_packages", java.util.Collections.emptySet()));
+    }
+    public void saveApprovedPackages(String provider, Set<String> packages) {
+        if (!provider.equals(GEMINI) && !provider.equals(OPENAI)) throw new IllegalArgumentException("Invalid provider");
+        SharedPreferences.Editor editor = prefs.edit();
+        editor.putStringSet(provider + ".approved_packages", new TreeSet<>(packages));
+        if (!editor.commit()) throw new IllegalStateException("Could not save approved packages.");
+        for (String pkg : packages) {
+            try { SharingConsent.setPackageAllowed(provider, pkg, true); } catch (Exception ignored) {}
+        }
+    }
+    public void approvePackage(String provider, String pkg) {
+        if (!provider.equals(GEMINI) && !provider.equals(OPENAI)) throw new IllegalArgumentException("Invalid provider");
+        Set<String> set = approvedPackages(provider);
+        set.add(pkg.trim().toLowerCase(java.util.Locale.ROOT));
+        saveApprovedPackages(provider, set);
+    }
+    public void revokePackage(String provider, String pkg) {
+        if (!provider.equals(GEMINI) && !provider.equals(OPENAI)) throw new IllegalArgumentException("Invalid provider");
+        Set<String> set = approvedPackages(provider);
+        set.remove(pkg.trim().toLowerCase(java.util.Locale.ROOT));
+        saveApprovedPackages(provider, set);
+        SharingConsent.setPackageAllowed(provider, pkg, false);
     }
     public void approveSite(String provider, String domain) {
         if (!provider.equals(GEMINI) && !provider.equals(OPENAI)) throw new IllegalArgumentException("Invalid provider");
@@ -98,6 +130,7 @@ public final class AssistantSettings {
     public void saveProvider(String newProvider) {
         if (!newProvider.equals(GEMINI) && !newProvider.equals(OPENAI)) throw new IllegalArgumentException("Invalid provider");
         if (!prefs.edit().putString("provider", newProvider).commit()) throw new IllegalStateException("Could not save provider.");
+        SharingConsent.setActiveProvider(newProvider);
     }
     public void saveUserPreferences(String notes) { saveGeneral(sharingEnabled(),screenshotsEnabled(),rememberPreferences(),audioTonesEnabled(),notes); }
     public String apiKey(String provider) throws Exception {
@@ -121,6 +154,7 @@ public final class AssistantSettings {
             editor.putString(provider + ".key",encrypt(provider,key));
         }
         if (!editor.commit()) throw new IllegalStateException("Could not save settings.");
+        SharingConsent.setActiveProvider(provider);
     }
     public void removeKey(String provider) { prefs.edit().remove(provider + ".key").apply(); }
 }

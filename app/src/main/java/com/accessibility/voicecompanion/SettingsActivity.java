@@ -12,6 +12,10 @@ import android.view.View;
 import android.view.WindowManager;
 import android.widget.*;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Locale;
+import java.util.Set;
+import java.util.TreeSet;
 
 /** Clean, accessible settings UI with Keystore-backed encryption. */
 public class SettingsActivity extends Activity implements VoiceEngineManager.Callback {
@@ -29,10 +33,11 @@ public class SettingsActivity extends Activity implements VoiceEngineManager.Cal
     private EditText key;
     private TextView keyStatus, feedback;
     private Switch sharing, screenshots, remember, audioTones, allSites;
-    private EditText sites, notes;
+    private EditText sites, notes, apps;
     private Spinner provider;
     private final HashMap<String,String> models = new HashMap<>(), keys = new HashMap<>();
     private final HashMap<String,String> siteDrafts = new HashMap<>();
+    private final HashMap<String,String> appDrafts = new HashMap<>();
     private final HashMap<String,Boolean> allSiteDrafts = new HashMap<>();
 
     @Override public void onCreate(Bundle state) {
@@ -88,6 +93,17 @@ public class SettingsActivity extends Activity implements VoiceEngineManager.Cal
         label(root,"A spoken Yes remembers that exact hostname for this provider across visits and app restarts. Subdomains need their own approval. Add or remove hostnames here, then Save settings. Enter example.com, without a URL, path, port, or wildcard.");
         Button clearSites = new Button(this); clearSites.setText("Clear sharing approvals for this provider"); root.addView(clearSites);
         clearSites.setOnClickListener(v -> { sites.setText(""); allSites.setChecked(false); voice.speak("Sharing approvals cleared for this provider. Save settings to apply."); });
+
+        TextView appsLabel = label(root,"Approved Android apps for this provider (one package name per line)");
+        apps = new EditText(this); apps.setId(View.generateViewId()); appsLabel.setLabelFor(apps.getId()); apps.setMinLines(2);
+        apps.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+        apps.setSaveEnabled(false);
+        if (Build.VERSION.SDK_INT >= 26) apps.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO);
+        root.addView(apps);
+        label(root,"Allowed native apps default to none. Banking and UPI apps (PhonePe, GPay, Paytm, SBI YONO, BHIM) cannot be approved. Example: com.whatsapp, com.android.contacts.");
+        Button clearApps = new Button(this); clearApps.setText("Clear app approvals for this provider"); root.addView(clearApps);
+        clearApps.setOnClickListener(v -> { apps.setText(""); voice.speak("App approvals cleared for this provider. Save settings to apply."); });
+
         remember = new Switch(this); remember.setText("Remember and use my feedback preferences"); remember.setChecked(settings.rememberPreferences()); root.addView(remember);
         TextView notesLabel = label(root,"Saved preferences (one per line)");
         notes = new EditText(this); notes.setId(View.generateViewId()); notesLabel.setLabelFor(notes.getId()); notes.setMinLines(3);
@@ -103,9 +119,11 @@ public class SettingsActivity extends Activity implements VoiceEngineManager.Cal
             try {
                 String secret = key.getText().toString().trim();
                 java.util.Set<String> approved = SharingConsent.sites(sites.getText().toString());
+                java.util.Set<String> approvedPkgs = parsePackages(apps.getText().toString());
                 settings.save(current, model.getText().toString().trim(), secret, language.getText().toString().trim());
                 settings.saveGeneral(sharing.isChecked(),screenshots.isChecked(),remember.isChecked(),audioTones.isChecked(),notes.getText().toString());
                 settings.saveSharingConsent(current,allSites.isChecked(),approved);
+                settings.saveApprovedPackages(current, approvedPkgs);
                 Toast.makeText(this, "Settings saved", Toast.LENGTH_SHORT).show(); finish();
             } catch (IllegalArgumentException e) { feedback.setText(e.getMessage()); }
             catch (Exception e) { feedback.setText("Could not save all settings. Please try again."); }
@@ -117,6 +135,7 @@ public class SettingsActivity extends Activity implements VoiceEngineManager.Cal
                 if (current != null) {
                     models.put(current, model.getText().toString()); keys.put(current, key.getText().toString());
                     siteDrafts.put(current,sites.getText().toString()); allSiteDrafts.put(current,allSites.isChecked());
+                    appDrafts.put(current, apps.getText().toString());
                 }
                 current = position == 0 ? AssistantSettings.GEMINI : AssistantSettings.OPENAI;
                 String[] suggestions = current.equals(AssistantSettings.OPENAI) ? new String[]{"gpt-4.1-mini", "gpt-4.1", "gpt-4o-mini"} : new String[]{"gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-2.5-pro"};
@@ -124,6 +143,7 @@ public class SettingsActivity extends Activity implements VoiceEngineManager.Cal
                 model.setText(models.containsKey(current) ? models.get(current) : settings.model(current), false);
                 key.setText(keys.containsKey(current) ? keys.get(current) : ""); updateKeyStatus();
                 sites.setText(siteDrafts.containsKey(current) ? siteDrafts.get(current) : String.join("\n",settings.approvedSites(current)));
+                apps.setText(appDrafts.containsKey(current) ? appDrafts.get(current) : String.join("\n",settings.approvedPackages(current)));
                 allSites.setChecked(allSiteDrafts.containsKey(current) ? allSiteDrafts.get(current) : settings.allSitesAllowed(current));
             }
             @Override public void onNothingSelected(AdapterView<?> parent) { }
@@ -136,6 +156,21 @@ public class SettingsActivity extends Activity implements VoiceEngineManager.Cal
             voice.setTonesEnabled(isChecked);
         });
         if (state == null) guideSetup();
+    }
+
+    private static Set<String> parsePackages(String text) {
+        Set<String> set = new TreeSet<>();
+        if (text == null || text.trim().isEmpty()) return set;
+        for (String p : text.trim().split("\\s+")) {
+            String pkg = p.trim().toLowerCase(Locale.ROOT);
+            if (!pkg.isEmpty()) {
+                if (SharingConsent.isBankingPackage(pkg)) {
+                    throw new IllegalArgumentException("Cannot approve banking or payment app: " + pkg);
+                }
+                set.add(pkg);
+            }
+        }
+        return set;
     }
 
     private void runSetupAction() {
@@ -347,6 +382,22 @@ public class SettingsActivity extends Activity implements VoiceEngineManager.Cal
             voice.speak("AI provider set to OpenAI.");
             return true;
         }
+        if (norm.matches(".*(allow|enable)\\s+whatsapp.*")) {
+            settings.approvePackage(current, "com.whatsapp");
+            apps.setText(String.join("\n", settings.approvedPackages(current)));
+            voice.speak("WhatsApp approved for " + current + ".");
+            return true;
+        }
+        if (norm.matches(".*(revoke|disable|remove)\\s+whatsapp.*")) {
+            settings.revokePackage(current, "com.whatsapp");
+            apps.setText(String.join("\n", settings.approvedPackages(current)));
+            voice.speak("WhatsApp revoked for " + current + ".");
+            return true;
+        }
+        if (norm.matches(".*(allow|enable)\\s+(phonepe|gpay|google pay|paytm|bhim|yono|sbi yono).*")) {
+            voice.speak("Banking and payment apps cannot be shared with AI providers for your financial security.");
+            return true;
+        }
         if (norm.matches(".*(clear approvals|clear sites|clear approved sites).*")) {
             sites.setText("");
             allSites.setChecked(false);
@@ -358,9 +409,11 @@ public class SettingsActivity extends Activity implements VoiceEngineManager.Cal
             try {
                 String secret = key.getText().toString().trim();
                 java.util.Set<String> approved = SharingConsent.sites(sites.getText().toString());
+                java.util.Set<String> approvedPkgs = parsePackages(apps.getText().toString());
                 settings.save(current, model.getText().toString().trim(), secret, language.getText().toString().trim());
                 settings.saveGeneral(sharing.isChecked(),screenshots.isChecked(),remember.isChecked(),audioTones.isChecked(),notes.getText().toString());
                 settings.saveSharingConsent(current,allSites.isChecked(),approved);
+                settings.saveApprovedPackages(current, approvedPkgs);
                 voice.speak("Settings saved.");
                 finish();
                 return true;
