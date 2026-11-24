@@ -21,7 +21,7 @@ public class ConversationMemoryTest {
         memory.add("user","Describe this page","https://amazon.in/home?secret=private-query#private-fragment","Amazon home",7);
         memory.add("assistant","There is a sponsored ad for Acme headphones.","https://amazon.in/home?secret=private-query","Amazon home",7);
         session.stop(); session.start("Tell me more about that ad");
-        memory.add("user",session.goal(),"https://amazon.in/home","Amazon home",7);
+        memory.add("user",session.goal(), "https://amazon.in/home","Amazon home",7);
         for (String provider : new String[]{AssistantSettings.GEMINI,AssistantSettings.OPENAI}) {
             JSONObject sent = content(provider,AssistantClient.body(provider,"model",input(session.goal(),memory)));
             JSONArray turns = sent.getJSONArray("conversation_history");
@@ -39,6 +39,15 @@ public class ConversationMemoryTest {
         check(memory.snapshot("amazon.in").length()==3);
         check(memory.snapshot("museum.example").length()==1);
         check(memory.snapshot("unknown.example").length()==0);
+
+        // Verify cross-hostname context isolation (Post-Muse Hardening Task 13)
+        ConversationMemory siteIsolation = new ConversationMemory();
+        siteIsolation.add("assistant", "BESCOM Bill: ₹1,450 Account 54321", "https://bescom.co.in/portal", "BESCOM Portal", 101);
+        check(siteIsolation.snapshot("bescom.co.in").length() == 1);
+        check(siteIsolation.snapshot("bescom.co.in").getJSONObject(0).getString("text").contains("₹1,450"));
+        check(siteIsolation.snapshot("irctc.co.in").length() == 0);
+        check(siteIsolation.snapshot("wikipedia.org").length() == 0);
+
         for (int i=0;i<40;i++) memory.add("assistant","Long text "+"x".repeat(3000),"https://example.com/","Example",9);
         check(memory.snapshot().length()<=24); check(memory.snapshot().toString().length()<=16000);
         memory.clear(); check(memory.snapshot().length()==0);
