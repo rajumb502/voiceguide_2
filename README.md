@@ -4,6 +4,36 @@ An experimental native Android Java voice agent for browser and on-demand assist
 Users choose Gemini or OpenAI and provide their own API key. Requests go directly to
 that provider; Python is not required. The original blueprint is in requirements.md.
 
+## Summary of Capabilities
+
+Voice Companion is an **audio-first, non-visual web browser and assistive companion** for Android, designed specifically for blind and low-vision users (with first-class Indian English and Hindi support). It uses your own Gemini or OpenAI API key directly on-device—no backend server or subscription required.
+
+1. **Audio-First Web Browsing:**
+   - **Audio Landmark Briefs:** Spoken layout orientation (page title, count of editable inputs, and interactive controls) on every page load before speaking a goal.
+   - **Goal-Directed AI Automation:** Multimodal step-by-step browser loop with local validation and DOM element targeting.
+   - **React/Angular Synthetic Inputs:** Native property descriptor setters and bubbling `input`/`change`/`blur` event cascade for dynamic single-page apps.
+   - **Instant Touch Interrupt:** Tap anywhere on the WebView while TTS speaks to pause speech and immediately start listening.
+2. **Physical & Financial Safety Guards (`ActionSafetyGuard`):**
+   - **Hardware Double-Press Gate:** High-stakes actions (paying, transferring, deleting, submitting forms, filling OTPs) require a physical Volume Up double-press within 1,200 ms; spoken "Yes" or "Haan" is strictly rejected.
+   - **TalkBack Coexistence:** Only single key presses (`repeatCount == 0`) are filtered, preserving TalkBack's 3-second simultaneous dual-volume shortcut.
+   - **Sensitive Field Redaction:** Passwords, PINs, MPINs, CVVs, Aadhaar, PAN, and OTPs are masked to `[REDACTED]` locally before processing.
+   - **Payment Frame Isolation:** Preserves `payment_frame` iframe nodes for coordinate taps while redacting main-document secrets.
+3. **Hands-Free SMS OTP Auto-Read (`SmsOtpHelper`):**
+   - **Zero-Permission SMS Consent:** Uses Google Play Services SMS User Consent API (zero `READ_SMS` permission).
+   - **Auto-Approved Consent Sheet:** Auto-clicks "Allow" on GMS modal sheets within a bounded 60s window, speaks the OTP digit-by-digit, and gates entry behind Volume Up confirmation.
+4. **Encrypted Local Macros ("Teach Once, Replay Forever"):**
+   - **Save & Replay:** Save successful multi-step browser flows locally (`MacroStore`, AES-256 encrypted) and replay with zero API calls.
+   - **Semantic Anchor Fallbacks:** Resilient replay checks CSS selectors → `aria-label` → accessible label → element name → placeholder.
+5. **Controlled Native App Assistance (`NativeAppDriver`):**
+   - **On-Demand App Reading:** Traverses Android's accessibility node tree (up to 150 nodes) for explicitly approved native apps.
+   - **Zero Background Scraping & Banking Shield:** Default-denied package policy with hard permanent block on banking/UPI apps (PhonePe, GPay, Paytm, SBI YONO, BHIM, etc.).
+   - **Banking Pause Command:** Saying "pause assistant for banking" disables the accessibility service via `disableSelf()` (API 24+) to bypass strict bank RASP checks.
+   - **Share-Sheet Receiver:** Direct `ACTION_SEND` (`text/plain`) handler reads shared articles or exported chat text without accessibility permissions.
+6. **Privacy & Context Architecture:**
+   - **Per-Host & Per-Provider Consent:** Spoken per-domain approval required before sending data, backed by Android Keystore AES-256 encryption.
+   - **Zero Cross-Site Memory Bleed:** Hostname-isolated conversation history prevents financial or context leakage across websites.
+   - **Saved Feedback Preferences:** App-private local memory for voice guidance rules ("Keep answers short", "Prefer prices before features").
+
 ## Give the assistant a goal
 
 Tap **Speak**, wait for the tone, and tell it what you want to accomplish. Examples:
@@ -119,7 +149,7 @@ Strict anti-scraping boundaries are enforced in `BackgroundVoiceService` and `Sh
   session is active and the package is explicitly approved (`SharingConsent.isPackageAllowed`),
   except during the bounded 60s SMS consent prompt.
 - **Permanent denylist:** Encrypted messengers and Indian banking/UPI packages (PhonePe,
-  Google Pay, Paytm, BHIM, SBI YONO, Signal, etc.) are blocked from automatic inspection
+  Google Pay, Paytm, SBI YONO, BHIM, etc.) are blocked from automatic inspection
   and suggestion.
 - **Banking pause & `FLAG_SECURE`:** `NativeAppDriver` respects `FLAG_SECURE` / empty trees
   by aborting capture and speaking a security warning. Saying “pause assistant for banking”
