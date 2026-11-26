@@ -119,3 +119,46 @@
   - Verify `BackgroundVoiceService` drops `AccessibilityEvent`s when `isUserTriggeredSessionActive == false` or when an unapproved package is active, and expires `awaitingSmsConsent` after `60,001ms`.
   - Verify `NativeAppDriver` serializes mock `AccessibilityNodeInfo` trees (including WhatsApp-style message lists), redacts `isPassword()`/OTP nodes, and triggers `ActionSafetyGuard` before clicking a `"Send"` button.
   - *Status:* **Completed.** Added `NativeAppDriverTest.java`, updated `BackgroundVoiceServiceTest.java`, and expanded `SharingConsentUnitTest.java`. All JVM unit tests pass deterministically.
+
+---
+
+## Phase 7: Voice-First Settings & Utility Upgrades (P1 — Hands-Free Voice Control)
+*Goal: Allow visually impaired users to set, unset, and inspect all settings and preferences completely hands-free via voice, while borrowing high-utility patterns from `vg_flutter` (TTS speech rate control, facts/profile memory, system deep links, and session resets).*
+
+- [ ] **Task 7.1: Voice-Controlled Speech Rate & Audio Earcon Toggles (`VoiceEngineManager.java`, `AssistantSettings.java`, & `VoiceBrowserActivity.java`)**
+  - Add voice commands to adjust TTS speech rate: "speak faster", "speak slower", "set speech speed to 1.5", "normal speech speed" (mapping to `tts.setSpeechRate(...)` within 0.5x–3.0x range).
+  - Add voice commands to toggle earcons/tones: "turn off tones", "turn on audio tones" (`settings.saveAudioTones(...)`).
+  - Persist speech rate and audio preferences in `AssistantSettings` so they are restored across app launches.
+  - *Status:* **Pending.**
+
+- [ ] **Task 7.2: Voice-Controlled Privacy & AI Feature Toggles (`AssistantSettings.java`, `VoiceBrowserActivity.java`, & `VoiceCommands.java`)**
+  - Enable toggling all boolean settings by voice without requiring visual navigation to `SettingsActivity`:
+    - "Enable/disable page sharing" (`settings.saveSharingEnabled()`)
+    - "Enable/disable screenshots" (`settings.saveScreenshotsEnabled()`)
+    - "Enable/disable remembering preferences" (`settings.saveRememberPreferences()`)
+  - Add voice query to inspect active settings: "Read my settings" or "What are my settings?" to speak the state of toggles, provider, and speech rate.
+  - *Status:* **Pending.**
+
+- [ ] **Task 7.3: Form Auto-Fill Facts & Profile Preferences ("Remember my Consumer ID") (`UserPreferences.java` & `AssistantClient.java`)**
+  - Extend `UserPreferences` to capture and store key-value user facts (e.g., "remember my consumer ID is 12345", "remember my voter ID is ABC...", "remember my email is user@example.com").
+  - Encrypt facts locally via `KeystoreCryptoHelper` and inject into `user_preferences` system prompt.
+  - Instruct `AssistantClient` to utilize remembered user facts when filling forms on matching portals without reprompting the user.
+  - Add voice commands to inspect or clear stored facts: "What facts do you remember?", "Forget my facts".
+  - *Status:* **Pending.**
+
+- [ ] **Task 7.4: Voice Session Reset / "Start Fresh" (`VoiceCommands.java` & `VoiceBrowserActivity.java`)**
+  - Add voice aliases ("start fresh", "new session", "reset assistant") to `VoiceCommands.java` alongside "clear conversation".
+  - Wipes short-term page task history (`agent.stop()`), clears `ConversationMemory`, clears pending states, and speaks verbal confirmation: *"Started fresh. What would you like to do?"*
+  - *Status:* **Pending.**
+
+- [ ] **Task 7.5: Native Intent Deep-Link Handling (`VoiceCommands.java` & `VoiceBrowserActivity.java`)**
+  - Expand `VoiceCommands` to detect dialer, map, and mail intent schemes (`tel:`, `geo:`, `mailto:`, e.g., "call 9876543210", "navigate to Bangalore City Railway Station").
+  - Launch standard Android intents (`Intent.ACTION_DIAL`, `Intent.ACTION_VIEW`) directly rather than sending them to the LLM browser loop.
+  - Gate outgoing phone calls or direct communications behind `ActionSafetyGuard` confirmation if they trigger immediate dialing/action.
+  - *Status:* **Pending.**
+
+- [ ] **Task 7.6: Automated Unit & Integration Tests for Phase 7**
+  - Unit-test voice setting parsing (speech rate adjustments, toggling sharing/screenshots/audio tones).
+  - Unit-test fact extraction and Keystore encryption round-trip in `UserPreferences`.
+  - Unit-test deep-link intent resolution in `VoiceCommands`.
+  - *Status:* **Pending.**
