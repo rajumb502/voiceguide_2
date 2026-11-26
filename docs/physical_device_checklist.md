@@ -73,11 +73,15 @@ Manual end-to-end verification protocol for Voice Companion on physical Android 
 
 ---
 
-## 4. GMS SMS User Consent Auto-Click & OTP Entry
+## 4. GMS SMS User Consent Auto-Click, Dual-SIM Headers & OTP Extraction
 
-1. **Trigger OTP Flow**
-   - On a login/verification page, request an SMS OTP.
-   - **Expected:** `SmsOtpHelper` calls `startSmsUserConsent(null)` and opens the 60-second `awaitingSmsConsent` window (`com.google.android.gms` only).
+1. **Trigger OTP Flow & Dual-SIM / Indian Header Handling**
+   - On a login/verification page (e.g., BESCOM or Indian portal), request an SMS OTP.
+   - Test with carrier SMS sent from typical Indian 6-character sender headers (e.g., `VM-BESCOM`, `AD-HDFCBK`, `AX-SBIINB`, `BP-KOTAKB`).
+   - Message containing mixed numbers: *"Your BESCOM electricity bill account #9876543210 has generated OTP 482910 for bill payment of Rs. 1450. Valid for 10 mins. Do not share with anyone."*
+   - **Expected:**
+     - `SmsOtpHelper` initiates `startSmsUserConsent(null)` and opens the 60s bounded consent window.
+     - `SmsOtpHelper.extractOtp()` accurately extracts the 6-digit OTP (`482910`) and does **not** pick the 10-digit account number (`9876543210`) or bill amount (`1450`).
 2. **Auto-Approve Bottom Sheet**
    - When the SMS arrives and Google Play Services displays the `"Allow <app> to read the message below?"` modal bottom sheet:
    - **Expected:** `BackgroundVoiceService.onAccessibilityEvent()` locates `com.google.android.gms:id/positive_button` (or `"Allow"`), clicks it automatically without requiring TalkBack touch exploration, and immediately resets `awaitingSmsConsent = false`.
@@ -92,14 +96,30 @@ Manual end-to-end verification protocol for Voice Companion on physical Android 
 
 ---
 
-## 5. Cross-App Privacy, Denylist & Banking Handoff Checks
+## 5. Cross-App Privacy, Opt-In Native Apps (WhatsApp) & Banking Handoff Checks
 
-1. **Zero Background Scraping & Denylist**
-   - Switch away from Voice Companion to **WhatsApp**, **PhonePe**, **Google Pay**, or **SBI YONO**.
-   - **Expected:** `BackgroundVoiceService` drops all accessibility events immediately; no screen nodes or screenshots are captured or uploaded.
-2. **Pause Assistant for Banking**
+1. **Opt-In Native App Assistance (WhatsApp Summarization / Navigation)**
+   - In Voice Companion **Settings**, navigate to **Allowed native apps**.
+   - Speak *"Allow WhatsApp"* or toggle `com.whatsapp` to **Allowed** in the Settings UI.
+   - Switch to **WhatsApp** and open a group or 1-on-1 chat.
+   - Double-tap the **Voice Companion** accessibility floating button or speak *"summarize this screen"* / *"read messages"*.
+   - **Expected:**
+     - `BackgroundVoiceService` confirms `SharingConsent.isPackageAllowed("com.whatsapp")` is `true`.
+     - `NativeAppDriver` inspects `getRootInActiveWindow()` (up to 150 nodes), extracts chat text, redacts sensitive inputs, and Gemini/OpenAI speaks a concise summary of visible messages.
+   - Say *"Revoke WhatsApp"* in Settings.
+   - Return to WhatsApp and re-trigger.
+   - **Expected:** Prompt asks *"Allow sharing screen details from WhatsApp with [Provider]? Say Yes or No"*; if declined, screen reading aborts immediately with zero inspection.
+2. **Zero Background Scraping & Unapproved App Block**
+   - Switch to an unapproved non-banking app (e.g., **Telegram** or **System Settings**).
+   - **Expected:** `BackgroundVoiceService` drops all accessibility events immediately; no screen nodes or screenshots are captured or sent.
+3. **Permanent Banking App Block (PhonePe, GPay, SBI YONO, Paytm, BHIM)**
+   - In Settings, attempt to say *"Allow PhonePe"* or enter `com.phonepe.app`.
+   - **Expected:** Assistant rejects approval with a spoken security warning: *"Banking and payment apps cannot be shared with AI providers for your financial security."*
+   - Launch **PhonePe**, **Google Pay**, or **SBI YONO**.
+   - **Expected:** `BackgroundVoiceService` encounters the package in `STRICT_BANKING_PACKAGES`, bails immediately from `onAccessibilityEvent()`, and drops all node inspection.
+4. **Pause Assistant for Banking**
    - Say *"pause assistant for banking"* in Voice Companion.
    - **Expected:** `BackgroundVoiceService.disableSelf()` runs (Android 7.0+) and TTS confirms the service is paused so banking apps with strict RASP checks launch unobstructed.
-3. **Zero-Accessibility Share Sheet (`ACTION_SEND`)**
-   - Share plain text or a URL from another app (e.g., an article or exported chat) to **Voice Companion**.
-   - **Expected:** `VoiceBrowserActivity.handleIncomingIntent()` opens URLs directly or speaks shared text without requiring Accessibility permissions.
+5. **Zero-Accessibility Share Sheet (`ACTION_SEND`)**
+   - In WhatsApp, export a chat without media (*Export Chat → Without Media*) or share an article link, selecting **Voice Companion** from the Android system share sheet.
+   - **Expected:** `VoiceBrowserActivity.handleIncomingIntent()` receives the text directly and speaks the content or opens the URL without requiring Accessibility permissions.

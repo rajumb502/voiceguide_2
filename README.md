@@ -22,17 +22,17 @@ Voice Companion is an **audio-first, non-visual web browser and assistive compan
    - **Zero-Permission SMS Consent:** Uses Google Play Services SMS User Consent API (zero `READ_SMS` permission).
    - **Auto-Approved Consent Sheet:** Auto-clicks "Allow" on GMS modal sheets within a bounded 60s window, speaks the OTP digit-by-digit, and gates entry behind Volume Up confirmation.
 4. **Encrypted Local Macros ("Teach Once, Replay Forever"):**
-   - **Save & Replay:** Save successful multi-step browser flows locally (`MacroStore`, AES-256 encrypted) and replay with zero API calls.
+   - **Save & Replay:** Save successful multi-step browser flows locally (`MacroStore`, AES-256 encrypted via `KeystoreCryptoHelper`) and replay with zero API calls.
    - **Semantic Anchor Fallbacks:** Resilient replay checks CSS selectors → `aria-label` → accessible label → element name → placeholder.
 5. **Controlled Native App Assistance (`NativeAppDriver`):**
    - **On-Demand App Reading:** Traverses Android's accessibility node tree (up to 150 nodes) for explicitly approved native apps.
-   - **Zero Background Scraping & Banking Shield:** Default-denied package policy with hard permanent block on banking/UPI apps (PhonePe, GPay, Paytm, SBI YONO, BHIM, etc.).
+   - **Zero Background Scraping & Banking Shield:** Default-denied package policy. Messaging apps (e.g., WhatsApp `com.whatsapp`) can be explicitly opted in via Settings or voice (*"Allow WhatsApp"*); Indian banking/UPI apps (PhonePe, GPay, Paytm, SBI YONO, BHIM, etc.) are permanently blocked.
    - **Banking Pause Command:** Saying "pause assistant for banking" disables the accessibility service via `disableSelf()` (API 24+) to bypass strict bank RASP checks.
    - **Share-Sheet Receiver:** Direct `ACTION_SEND` (`text/plain`) handler reads shared articles or exported chat text without accessibility permissions.
 6. **Privacy & Context Architecture:**
    - **Per-Host & Per-Provider Consent:** Spoken per-domain approval required before sending data, backed by Android Keystore AES-256 encryption.
    - **Zero Cross-Site Memory Bleed:** Hostname-isolated conversation history prevents financial or context leakage across websites.
-   - **Saved Feedback Preferences:** App-private local memory for voice guidance rules ("Keep answers short", "Prefer prices before features").
+   - **Saved Feedback Preferences:** App-private local memory for voice guidance rules ("Keep answers short", "Prefer prices before features") encrypted via `KeystoreCryptoHelper`.
 
 ## Give the assistant a goal
 
@@ -105,8 +105,8 @@ user/assistant/page messages within a 16,000-character budget, including interme
 spoken progress, final descriptions, local readouts, and page references. Each message
 records its page title, site, path, and page ID; URL queries and fragments are omitted.
 The model receives the current page separately and must check it before reusing old facts
-or stating balances/confirmations. Memory is encrypted with Android Keystore and saved in
-a bounded SQLite record across activity recreation and process exits. Only conversation from
+or stating balances/confirmations. Memory is encrypted with Android Keystore (`KeystoreCryptoHelper` AES-GCM)
+and saved in a bounded SQLite record across activity recreation and process exits. Only conversation from
 the current site is shared under saved sharing approvals. Say “clear conversation” outside
 a pending question to erase it explicitly.
 
@@ -148,9 +148,12 @@ Strict anti-scraping boundaries are enforced in `BackgroundVoiceService` and `Sh
 - **Zero background scraping:** Accessibility events are ignored unless a user-triggered
   session is active and the package is explicitly approved (`SharingConsent.isPackageAllowed`),
   except during the bounded 60s SMS consent prompt.
-- **Permanent denylist:** Encrypted messengers and Indian banking/UPI packages (PhonePe,
-  Google Pay, Paytm, SBI YONO, BHIM, etc.) are blocked from automatic inspection
-  and suggestion.
+- **Opt-in messaging vs. blocked banking:** Encrypted messengers (e.g., WhatsApp `com.whatsapp`)
+  default to denied and are not automatically suggested, but users can explicitly opt them in
+  via Settings toggles or voice commands (*"Allow WhatsApp"* / *"Revoke WhatsApp"*). This enables
+  on-demand reading and summarization of WhatsApp chats. Indian banking/UPI packages (PhonePe,
+  Google Pay, Paytm, SBI YONO, BHIM, Axis, ICICI, etc.) are strictly excluded and can never be
+  approved.
 - **Banking pause & `FLAG_SECURE`:** `NativeAppDriver` respects `FLAG_SECURE` / empty trees
   by aborting capture and speaking a security warning. Saying “pause assistant for banking”
   calls `disableSelf()` (Android 7.0+) so strict banking RASP checks are not triggered.
@@ -159,11 +162,17 @@ Strict anti-scraping boundaries are enforced in `BackgroundVoiceService` and `Sh
 
 For Play Store policy details, see [docs/play_store_accessibility.md](docs/play_store_accessibility.md).
 
-### Page Sharing & Profile Notes
+### Encrypted Storage Architecture & Profile Notes
 
-Page sharing, per-site approvals, per-app allowlists, and saved feedback preferences use
-`EncryptedSharedPreferences` backed by Android Keystore. Unknown websites require spoken
-per-site consent naming the host and selected provider before DOM/conversation data is sent.
+Voice Companion uses two complementary layers of hardware-backed encryption:
+- **Provider Settings & API Keys:** Stored in `AssistantSettings` using `EncryptedSharedPreferences`
+  backed by Android Keystore (`MasterKey` with `AES256_GCM` value encryption and `AES256_SIV` key encryption).
+- **App-Private Data & Allowances:** Local macros (`MacroStore`), user feedback preferences (`UserPreferences`),
+  conversation memory (`ConversationMemory`), and per-provider package allowlists (`SharingConsent`) are encrypted
+  directly using `KeystoreCryptoHelper` (AES-256-GCM authenticated encryption using hardware-backed non-exportable
+  Android Keystore secret keys).
+
+Unknown websites require spoken per-site consent naming the host and selected provider before DOM/conversation data is sent.
 Sharing is re-checked at the HTTP boundary (`AssistantClient`), and screenshots are bounded
 to 720 px JPEG quality 70 and omitted for sensitive pages (main-document passwords, OTP,
 PIN, MPIN, CVV, Aadhaar, PAN, or recognized sensitive inputs). Tagged `payment_frame` iframes
