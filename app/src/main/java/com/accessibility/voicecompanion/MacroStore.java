@@ -35,12 +35,18 @@ public final class MacroStore {
         public final String role;        // ARIA role
         public final String name;        // Element name attribute
         public final String placeholder; // Input placeholder
+        public final String ariaLabel;   // aria-label attribute (semantic anchor fallback for replay)
         public final String text;        // Text to enter for TYPE action
         public final String url;         // URL for NAVIGATE action
         public final String direction;   // "down" / "up" for SCROLL action
 
         public Step(String action, String selector, String label, String tag, String role,
                     String name, String placeholder, String text, String url, String direction) {
+            this(action, selector, label, tag, role, name, placeholder, "", text, url, direction);
+        }
+
+        public Step(String action, String selector, String label, String tag, String role,
+                    String name, String placeholder, String ariaLabel, String text, String url, String direction) {
             this.action = action == null || action.trim().isEmpty() ? "CLICK" : action.trim();
             this.selector = selector == null ? "" : selector.trim();
             this.label = label == null ? "" : label.trim();
@@ -48,6 +54,7 @@ public final class MacroStore {
             this.role = role == null ? "" : role.trim();
             this.name = name == null ? "" : name.trim();
             this.placeholder = placeholder == null ? "" : placeholder.trim();
+            this.ariaLabel = ariaLabel == null ? "" : ariaLabel.trim();
             this.text = text == null ? "" : text;
             this.url = url == null ? "" : url.trim();
             this.direction = direction == null ? "" : direction.trim();
@@ -63,6 +70,7 @@ public final class MacroStore {
                 if (!role.isEmpty()) json.put("role", role);
                 if (!name.isEmpty()) json.put("name", name);
                 if (!placeholder.isEmpty()) json.put("placeholder", placeholder);
+                if (!ariaLabel.isEmpty()) json.put("aria-label", ariaLabel);
                 if (!text.isEmpty()) json.put("text", text);
                 if (!url.isEmpty()) json.put("url", url);
                 if (!direction.isEmpty()) json.put("direction", direction);
@@ -73,7 +81,7 @@ public final class MacroStore {
         }
 
         public static Step fromJson(JSONObject json) {
-            if (json == null) return new Step("CLICK", "", "", "", "", "", "", "", "", "");
+            if (json == null) return new Step("CLICK", "", "", "", "", "", "", "", "", "", "");
             return new Step(
                 json.optString("action", "CLICK"),
                 json.optString("selector", ""),
@@ -82,6 +90,7 @@ public final class MacroStore {
                 json.optString("role", ""),
                 json.optString("name", ""),
                 json.optString("placeholder", ""),
+                json.optString("aria-label", ""),
                 json.optString("text", ""),
                 json.optString("url", ""),
                 json.optString("direction", "")

@@ -71,4 +71,16 @@ assert.equal(clicks, previousClicks + 1);
 assert.equal(api.executeMacroStep({action: 'CLICK', label: 'Non-existent button', tag: 'BUTTON'}, true), false);
 assert.equal(api.executeMacroStep(null), false);
 
+// Task 5.7: aria-label as semantic anchor fallback — selector miss, matched by aria-label
+button.innerText = 'View product'; button.disabled = false; button.attributes = {'aria-label': 'Pay electricity bill'};
+snapshot = JSON.parse(api.snapshot());
+// Snapshot should include aria-label in node
+assert.equal(snapshot.nodes.find(n => n.tag === 'BUTTON')['aria-label'], 'Pay electricity bill');
+// findTarget falls back to aria-label when selector is absent/stale
+const ariaClicks = clicks;
+assert.equal(api.executeMacroStep({action: 'CLICK', 'aria-label': 'Pay electricity bill', tag: 'BUTTON'}, true), true);
+assert.equal(clicks, ariaClicks + 1);
+// No match if aria-label differs
+assert.equal(api.executeMacroStep({action: 'CLICK', 'aria-label': 'No such button', tag: 'BUTTON'}, true), false);
+
 console.log('Page extraction, search discovery, click validation, and macro execution with guardrails passed');

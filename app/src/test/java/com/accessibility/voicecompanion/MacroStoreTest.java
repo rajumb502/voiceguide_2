@@ -64,6 +64,23 @@ public class MacroStoreTest {
     }
 
     @Test
+    public void testAriaLabelPersistedAndRoundTripped() {
+        // Task 5.7: aria-label stored and survives serialisation round-trip
+        MacroStore.Step step = new MacroStore.Step(
+                "CLICK", "", "Pay electricity bill", "BUTTON", "", "", "", "Pay electricity bill", "", "", "");
+        MacroStore.Macro macro = new MacroStore.Macro("BESCOM aria", "https://bescom.example.com", Arrays.asList(step));
+        store.saveMacro(macro);
+
+        MacroStore newStore = new MacroStore(context);
+        MacroStore.Macro retrieved = newStore.getMacro("BESCOM aria");
+        assertNotNull(retrieved);
+        assertEquals(1, retrieved.steps.size());
+        assertEquals("Pay electricity bill", retrieved.steps.get(0).ariaLabel);
+        // selector is blank — replay must fall through to aria-label anchor
+        assertEquals("", retrieved.steps.get(0).selector);
+    }
+
+    @Test
     public void testVoiceCommandMatching() {
         MacroStore.Step step = new MacroStore.Step("CLICK", "button", "Go", "BUTTON", "", "", "", "", "", "");
         store.saveMacro(new MacroStore.Macro("Check BESCOM Bill", "https://example.com", Arrays.asList(step)));

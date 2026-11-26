@@ -127,6 +127,7 @@
           type: el.getAttribute('type') || '',
           name: isSensitive ? '[REDACTED]' : (el.getAttribute('name') || ''),
           placeholder: isSensitive ? '[REDACTED]' : (el.getAttribute('placeholder') || ''),
+          'aria-label': isSensitive ? '[REDACTED]' : (el.getAttribute('aria-label') || ''),
           autocomplete: el.getAttribute('autocomplete') || '',
           href: el.tagName === 'A' ? el.href || '' : '',
           download: el.hasAttribute ? el.hasAttribute('download') : false,
@@ -234,6 +235,7 @@
       [step.action, step.label, step.selector, step.name, step.placeholder].join(' ')
     );
     if (risky && !approved) return false;
+    // Priority: CSS selector > aria-label > accessible label > name > placeholder
     function findTarget(s) {
       if (s.selector && typeof document.querySelector === 'function') {
         try {
@@ -246,6 +248,7 @@
         for (const el of root.querySelectorAll('*')) {
           if (!visible(el) || el.disabled || el.getAttribute?.('aria-disabled') === 'true') continue;
           if (s.tag && el.tagName && el.tagName.toUpperCase() !== s.tag.toUpperCase()) continue;
+          if (s['aria-label'] && el.getAttribute?.('aria-label') === s['aria-label']) return el;
           if (s.label && label(el).toLowerCase() === s.label.toLowerCase()) return el;
           if (s.name && el.getAttribute?.('name') === s.name) return el;
           if (s.placeholder && el.getAttribute?.('placeholder') === s.placeholder) return el;

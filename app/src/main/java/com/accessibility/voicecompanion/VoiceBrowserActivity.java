@@ -1117,6 +1117,7 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
                     targetNode.optString("role", ""),
                     targetNode.optString("name", ""),
                     targetNode.optString("placeholder", ""),
+                    targetNode.optString("aria-label", ""),
                     action.optString("text", ""),
                     "", ""
                 );
