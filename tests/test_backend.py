@@ -1,6 +1,6 @@
 import copy
 import unittest
-from backend.server import validate_action, validate_request
+from prototypes.server import validate_action, validate_request
 
 class BackendTests(unittest.TestCase):
     def setUp(self):

@@ -33,12 +33,15 @@
   - Store and match accessible labels, aria-labels, and input placeholders alongside CSS selectors in `MacroStore` and `page.js` during replay.
 
 #### P2 — Documentation, Cleanup & Physical Device Validation
-- [ ] **Task 5.8: Sync `README.md` with Completed Phases 1–4 (`tasks.md`)**
+- [x] **Task 5.8: Sync `README.md` with Completed Phases 1–4 (`tasks.md`)**
   - Document Volume Up double-press hardware confirmation, Audio Landmark Briefs, SMS User Consent auto-read, Encrypted Local Macros, and AccessibilityService integration.
-- [ ] **Task 5.9: Archive Unused Prototype Files (`backend/server.py`)**
+  - *Status:* **Completed.** `README.md` rewritten to cover Audio Landmark Briefs, Volume Up double-press safety gate, SMS User Consent auto-read, Encrypted Local Macros (save/replay/delete voice commands), AccessibilityService anti-scraping guardrails, banking handoffs, `FLAG_SECURE` handling, and cross-app denylist. Build and verification section updated.
+- [x] **Task 5.9: Archive Unused Prototype Files (`backend/server.py`)**
   - Move legacy `backend/server.py` to `prototypes/` or document its archival.
-- [ ] **Task 5.10: Document Physical Device Verification Suite Checklist (With TalkBack Enabled)**
+  - *Status:* **Completed.** `backend/server.py` moved to `prototypes/server.py` via `git mv`; file header updated with archival notice; `tests/test_backend.py` import updated to `prototypes.server`; `backend/` directory removed. All 7 Python tests still pass.
+- [x] **Task 5.10: Document Physical Device Verification Suite Checklist (With TalkBack Enabled)**
   - Document step-by-step manual test protocols for TalkBack coexistence, Wikipedia landmark brief, BESCOM React billing portal, and GMS SMS sheet auto-click.
+  - *Status:* **Completed.** `docs/physical_device_checklist.md` created with 5 sections: (1) TalkBack coexistence & Android 13+ Restricted Settings onboarding, (2) Wikipedia Audio Landmark Brief & basic navigation, (3) BESCOM React portal synthetic input / payment iframe / safety gate / macros, (4) GMS SMS User Consent auto-click & OTP entry, (5) cross-app privacy / denylist / banking handoff checks. Each section lists expected outcomes for pass/fail.
 
 ---
 

@@ -1,4 +1,7 @@
-"""Local-development Gemini gateway. Run behind HTTPS for a real device/deployment."""
+"""ARCHIVED PROTOTYPE: Legacy loopback Gemini proxy from Phase 1.
+Voice Companion now runs direct on-device LLM calls (Gemini / OpenAI) via AssistantClient.
+Retained solely as a historical reference and test fixture for snapshot validation schemas.
+"""
 import base64
 import binascii
 import hmac
