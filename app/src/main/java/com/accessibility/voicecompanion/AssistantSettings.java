@@ -42,6 +42,7 @@ public final class AssistantSettings {
             Object value = entry.getValue();
             if (value instanceof String) editor.putString(entry.getKey(),(String)value);
             else if (value instanceof Boolean) editor.putBoolean(entry.getKey(),(Boolean)value);
+            else if (value instanceof Float) editor.putFloat(entry.getKey(),(Float)value);
             else throw new IllegalStateException("Unexpected legacy setting; migration stopped.");
         }
         if (!editor.commit()) throw new IllegalStateException("Could not migrate settings.");
@@ -54,6 +55,7 @@ public final class AssistantSettings {
     public boolean screenshotsEnabled() { return prefs.getBoolean("share_screenshots", true); }
     public boolean rememberPreferences() { return prefs.getBoolean("remember_preferences", true); }
     public boolean audioTonesEnabled() { return prefs.getBoolean("audio_tones", true); }
+    public float speechRate() { return prefs.getFloat("speech_rate", 1.0f); }
     public String userPreferences() { return prefs.getString("user_preferences", ""); }
     public boolean allSitesAllowed(String provider) { return prefs.getBoolean(provider + ".share_all_sites",false); }
     public Set<String> approvedSites(String provider) { return new TreeSet<>(prefs.getStringSet(provider + ".approved_sites",java.util.Collections.emptySet())); }
@@ -100,19 +102,28 @@ public final class AssistantSettings {
         if (!prefs.edit().putStringSet(provider + ".approved_sites",set).commit()) throw new IllegalStateException("Could not save site approval.");
     }
     public void saveGeneral(boolean sharePage, boolean shareScreenshots, boolean rememberPreferences, String userPreferences) {
-        saveGeneral(sharePage, shareScreenshots, rememberPreferences, audioTonesEnabled(), userPreferences);
+        saveGeneral(sharePage, shareScreenshots, rememberPreferences, audioTonesEnabled(), speechRate(), userPreferences);
     }
     public void saveGeneral(boolean sharePage, boolean shareScreenshots, boolean rememberPreferences, boolean audioTones, String userPreferences) {
+        saveGeneral(sharePage, shareScreenshots, rememberPreferences, audioTones, speechRate(), userPreferences);
+    }
+    public void saveGeneral(boolean sharePage, boolean shareScreenshots, boolean rememberPreferences, boolean audioTones, float speechRate, String userPreferences) {
         if (userPreferences != null && userPreferences.length() > 4000) throw new IllegalArgumentException("Preferences exceed maximum length.");
+        float clampedRate = Math.max(0.5f, Math.min(3.0f, speechRate));
         SharedPreferences.Editor editor = prefs.edit().putBoolean("share_page",sharePage)
             .putBoolean("share_screenshots",shareScreenshots)
             .putBoolean("remember_preferences",rememberPreferences)
-            .putBoolean("audio_tones",audioTones);
+            .putBoolean("audio_tones",audioTones)
+            .putFloat("speech_rate",clampedRate);
         if (userPreferences != null) editor.putString("user_preferences",userPreferences);
         if (!editor.commit()) throw new IllegalStateException("Could not save settings.");
     }
     public void saveAudioTones(boolean enabled) {
         if (!prefs.edit().putBoolean("audio_tones", enabled).commit()) throw new IllegalStateException("Could not save audio tones setting.");
+    }
+    public void saveSpeechRate(float rate) {
+        float clamped = Math.max(0.5f, Math.min(3.0f, rate));
+        if (!prefs.edit().putFloat("speech_rate", clamped).commit()) throw new IllegalStateException("Could not save speech rate setting.");
     }
     public void saveSharingEnabled(boolean enabled) {
         if (!prefs.edit().putBoolean("share_page", enabled).commit()) throw new IllegalStateException("Could not save page sharing setting.");
@@ -132,7 +143,7 @@ public final class AssistantSettings {
         if (!prefs.edit().putString("provider", newProvider).commit()) throw new IllegalStateException("Could not save provider.");
         SharingConsent.setActiveProvider(newProvider);
     }
-    public void saveUserPreferences(String notes) { saveGeneral(sharingEnabled(),screenshotsEnabled(),rememberPreferences(),audioTonesEnabled(),notes); }
+    public void saveUserPreferences(String notes) { saveGeneral(sharingEnabled(),screenshotsEnabled(),rememberPreferences(),audioTonesEnabled(),speechRate(),notes); }
     public String apiKey(String provider) throws Exception {
         String encoded = prefs.getString(provider + ".key", "");
         if (encoded.isEmpty()) return "";

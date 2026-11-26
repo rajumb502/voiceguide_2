@@ -150,6 +150,7 @@ public class SettingsActivity extends Activity implements VoiceEngineManager.Cal
         });
         voice = new VoiceEngineManager(this,this);
         voice.setTonesEnabled(settings.audioTonesEnabled());
+        voice.setSpeechRate(settings.speechRate());
         voice.setLanguage(settings.locale());
         audioTones.setOnCheckedChangeListener((btn, isChecked) -> {
             settings.saveAudioTones(isChecked);
@@ -284,6 +285,37 @@ public class SettingsActivity extends Activity implements VoiceEngineManager.Cal
             voice.setTonesEnabled(false);
             voice.speak("Audio tones turned off.");
             return true;
+        }
+        if (norm.matches(".*(?:speak faster|faster speech|increase speech speed|speed up speech).*")) {
+            float newRate = Math.min(3.0f, (voice != null ? voice.getSpeechRate() : settings.speechRate()) + 0.25f);
+            settings.saveSpeechRate(newRate);
+            if (voice != null) voice.setSpeechRate(newRate);
+            if (voice != null) voice.speak(String.format(java.util.Locale.ROOT, "Speech speed set to %.1f times.", newRate));
+            return true;
+        }
+        if (norm.matches(".*(?:speak slower|slower speech|decrease speech speed|slow down speech).*")) {
+            float newRate = Math.max(0.5f, (voice != null ? voice.getSpeechRate() : settings.speechRate()) - 0.25f);
+            settings.saveSpeechRate(newRate);
+            if (voice != null) voice.setSpeechRate(newRate);
+            if (voice != null) voice.speak(String.format(java.util.Locale.ROOT, "Speech speed set to %.1f times.", newRate));
+            return true;
+        }
+        if (norm.matches(".*(?:normal speech|normal speed|reset speech speed).*")) {
+            settings.saveSpeechRate(1.0f);
+            if (voice != null) voice.setSpeechRate(1.0f);
+            if (voice != null) voice.speak("Speech speed reset to normal.");
+            return true;
+        }
+        {   // "set speech speed to 1.5" / "set speech rate to 2"
+            java.util.regex.Matcher m = java.util.regex.Pattern.compile(
+                ".*(?:set speech speed|set speech rate|speech speed|speech rate)\\s+to\\s+(\\d+(?:\\.\\d+)?).*").matcher(norm);
+            if (m.matches()) {
+                float newRate = Math.max(0.5f, Math.min(3.0f, Float.parseFloat(m.group(1))));
+                settings.saveSpeechRate(newRate);
+                if (voice != null) voice.setSpeechRate(newRate);
+                if (voice != null) voice.speak(String.format(java.util.Locale.ROOT, "Speech speed set to %.1f times.", newRate));
+                return true;
+            }
         }
         if (norm.matches(".*(turn on|enable|allow)\\s+(page sharing|sharing).*")) {
             sharing.setChecked(true);
@@ -443,6 +475,7 @@ public class SettingsActivity extends Activity implements VoiceEngineManager.Cal
         if (settings != null && voice != null) {
             voice.setLanguage(settings.locale());
             voice.setTonesEnabled(settings.audioTonesEnabled());
+            voice.setSpeechRate(settings.speechRate());
         }
         if (setupRunning && setupAttempted > 0) {
             advanceSetup();

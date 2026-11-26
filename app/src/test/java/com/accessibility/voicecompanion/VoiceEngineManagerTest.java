@@ -89,6 +89,16 @@ public class VoiceEngineManagerTest {
         assertSame(recognizer,ShadowSpeechRecognizer.getLatestSpeechRecognizer());
         assertTrue(feedback.get(feedback.size()-1).contains("did not hear clearly"));
     }
+    @Test public void speechRateDefaultsToOneAndClampsToRange() {
+        assertEquals(1.0f, voice.getSpeechRate(), 0.001f);
+        voice.setSpeechRate(2.0f);
+        assertEquals(2.0f, voice.getSpeechRate(), 0.001f);
+        voice.setSpeechRate(0.1f);  // below min → clamped to 0.5
+        assertEquals(0.5f, voice.getSpeechRate(), 0.001f);
+        voice.setSpeechRate(5.0f);  // above max → clamped to 3.0
+        assertEquals(3.0f, voice.getSpeechRate(), 0.001f);
+    }
+
     @Test public void tonesCanBeToggledOnAndOff() {
         assertTrue(voice.tonesEnabled());
         voice.setTonesEnabled(false);

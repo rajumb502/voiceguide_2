@@ -107,6 +107,7 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
         voice = new VoiceEngineManager(this, this);
         voice.setLanguage(locale);
         voice.setTonesEnabled(settings.audioTonesEnabled());
+        voice.setSpeechRate(settings.speechRate());
         LinearLayout root = new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL); root.setPadding(16,16,16,16);
         LinearLayout controls = new LinearLayout(this); controls.setOrientation(LinearLayout.HORIZONTAL);
         address = new EditText(this); address.setHint("Website URL or domain"); address.setInputType(InputType.TYPE_TEXT_VARIATION_URI);
@@ -810,6 +811,37 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
             }
             return true;
         }
+        if (normalized.matches(".*(?:speak faster|faster speech|increase speech speed|speed up speech).*")) {
+            float newRate = Math.min(3.0f, (voice != null ? voice.getSpeechRate() : settings.speechRate()) + 0.25f);
+            settings.saveSpeechRate(newRate);
+            if (voice != null) voice.setSpeechRate(newRate);
+            if (voice != null) voice.speak(String.format(java.util.Locale.ROOT, "Speech speed set to %.1f times.", newRate));
+            return true;
+        }
+        if (normalized.matches(".*(?:speak slower|slower speech|decrease speech speed|slow down speech).*")) {
+            float newRate = Math.max(0.5f, (voice != null ? voice.getSpeechRate() : settings.speechRate()) - 0.25f);
+            settings.saveSpeechRate(newRate);
+            if (voice != null) voice.setSpeechRate(newRate);
+            if (voice != null) voice.speak(String.format(java.util.Locale.ROOT, "Speech speed set to %.1f times.", newRate));
+            return true;
+        }
+        if (normalized.matches(".*(?:normal speech|normal speed|reset speech speed).*")) {
+            settings.saveSpeechRate(1.0f);
+            if (voice != null) voice.setSpeechRate(1.0f);
+            if (voice != null) voice.speak("Speech speed reset to normal.");
+            return true;
+        }
+        {   // "set speech speed to 1.5" / "set speech rate to 2"
+            java.util.regex.Matcher m = java.util.regex.Pattern.compile(
+                ".*(?:set speech speed|set speech rate|speech speed|speech rate)\\s+to\\s+(\\d+(?:\\.\\d+)?).*").matcher(normalized);
+            if (m.matches()) {
+                float newRate = Math.max(0.5f, Math.min(3.0f, Float.parseFloat(m.group(1))));
+                settings.saveSpeechRate(newRate);
+                if (voice != null) voice.setSpeechRate(newRate);
+                if (voice != null) voice.speak(String.format(java.util.Locale.ROOT, "Speech speed set to %.1f times.", newRate));
+                return true;
+            }
+        }
         if (normalized.matches(".*(turn on|enable|allow)\\s+(page sharing|sharing).*")) {
             settings.saveSharingEnabled(true);
             if (voice != null) voice.speak("Page sharing enabled.");
@@ -1190,6 +1222,7 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
             if (voice != null) {
                 voice.setLanguage(locale);
                 voice.setTonesEnabled(settings.audioTonesEnabled());
+                voice.setSpeechRate(settings.speechRate());
             }
         }
         if (smsOtpHelper != null) {

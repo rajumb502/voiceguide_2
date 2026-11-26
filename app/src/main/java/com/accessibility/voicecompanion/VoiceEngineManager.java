@@ -35,6 +35,7 @@ public final class VoiceEngineManager implements RecognitionListener {
     private String answerLocale;
     private Runnable thinkingRunnable;
     private boolean tonesEnabled = true;
+    private float speechRate = 1.0f;
 
     public VoiceEngineManager(Context context, Callback callback) {
         this.callback = callback;
@@ -53,6 +54,7 @@ public final class VoiceEngineManager implements RecognitionListener {
             if (destroyed) return;
             ready = status == TextToSpeech.SUCCESS;
             if (ready) {
+                tts.setSpeechRate(speechRate);
                 setLanguage(answerLocale == null ? "en-IN" : answerLocale);
                 if (queued != null) { String message = queued; queued = null; say(message); }
             } else callback.feedback("Speech output is unavailable. Check Android text-to-speech settings.");
@@ -76,6 +78,16 @@ public final class VoiceEngineManager implements RecognitionListener {
 
     public boolean tonesEnabled() {
         return tonesEnabled;
+    }
+
+    public void setSpeechRate(float rate) {
+        if (Looper.myLooper() != Looper.getMainLooper()) { main.post(() -> setSpeechRate(rate)); return; }
+        speechRate = Math.max(0.5f, Math.min(3.0f, rate));
+        if (ready && tts != null) tts.setSpeechRate(speechRate);
+    }
+
+    public float getSpeechRate() {
+        return speechRate;
     }
 
     public void playEarcon(int toneType, int durationMs) {

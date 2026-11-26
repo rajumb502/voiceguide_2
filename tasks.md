@@ -125,11 +125,11 @@
 ## Phase 7: Voice-First Settings & Utility Upgrades (P1 — Hands-Free Voice Control)
 *Goal: Allow visually impaired users to set, unset, and inspect all settings and preferences completely hands-free via voice, while borrowing high-utility patterns from `vg_flutter` (TTS speech rate control, facts/profile memory, system deep links, and session resets).*
 
-- [ ] **Task 7.1: Voice-Controlled Speech Rate & Audio Earcon Toggles (`VoiceEngineManager.java`, `AssistantSettings.java`, & `VoiceBrowserActivity.java`)**
+- [x] **Task 7.1: Voice-Controlled Speech Rate & Audio Earcon Toggles (`VoiceEngineManager.java`, `AssistantSettings.java`, & `VoiceBrowserActivity.java`)**
   - Add voice commands to adjust TTS speech rate: "speak faster", "speak slower", "set speech speed to 1.5", "normal speech speed" (mapping to `tts.setSpeechRate(...)` within 0.5x–3.0x range).
   - Add voice commands to toggle earcons/tones: "turn off tones", "turn on audio tones" (`settings.saveAudioTones(...)`).
   - Persist speech rate and audio preferences in `AssistantSettings` so they are restored across app launches.
-  - *Status:* **Pending.**
+  - *Status:* **Completed.** `VoiceEngineManager` gained `setSpeechRate(float)`/`getSpeechRate()` clamped to 0.5×–3.0×, applied to TTS on `initialize()` and whenever set. `AssistantSettings` persists `speech_rate` as a float (migrated cleanly). Both `VoiceBrowserActivity.preferenceCommand()` and `SettingsActivity.updateSettingByVoice()` handle *"speak faster"*, *"speak slower"*, *"normal speech"*, and *"set speech rate to N"*. Speech rate and tones are both reloaded from settings on `onCreate`/`onResume`. Verified with new `speechRateDefaultsToOneAndClampsToRange` test in `VoiceEngineManagerTest`; all 20 unit tests pass.
 
 - [ ] **Task 7.2: Voice-Controlled Privacy & AI Feature Toggles (`AssistantSettings.java`, `VoiceBrowserActivity.java`, & `VoiceCommands.java`)**
   - Enable toggling all boolean settings by voice without requiring visual navigation to `SettingsActivity`:
