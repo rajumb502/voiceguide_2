@@ -29,8 +29,9 @@
 - [x] **Task 5.6: Expand Sensitive Field Redaction Regex (`page.js`)**
   - Expand redaction regex to cover Indian mobile patterns: `otp`, `pin`, `mpin`, `cvv`, `aadhaar`, `pan`, `password`, `secret` across `id`, `name`, `placeholder`, `aria-label`, and associated `<label>`.
   - *Status:* **Completed.** Expanded redaction regex in `page.js` and `AssistantClient.java` to encompass Indian portal patterns (`mpin`, `aadhaar`, `pan`, `secret`, `otp`, `pin`, `cvv`) across `id`, `name`, `placeholder`, `aria-label`, and `<label>`. Verified in `tests/agent-page.test.js` and `AssistantClientTest.java`.
-- [ ] **Task 5.7: Add Semantic Anchor Fallbacks to Local Macros (`MacroStore.java` & `page.js`)**
+- [x] **Task 5.7: Add Semantic Anchor Fallbacks to Local Macros (`MacroStore.java` & `page.js`)**
   - Store and match accessible labels, aria-labels, and input placeholders alongside CSS selectors in `MacroStore` and `page.js` during replay.
+  - *Status:* **Completed.** `MacroStore.Step` gains an `ariaLabel` field (11-arg constructor; 10-arg compat overload keeps all existing call sites unchanged). `toJson`/`fromJson` persist `aria-label`. `VoiceBrowserActivity` records `aria-label` from the live DOM snapshot node. `page.js` snapshot emits `aria-label` per node; `findTarget()` checks aria-label before label/name/placeholder. Verified in `MacroStoreTest.testAriaLabelPersistedAndRoundTripped` and `page.test.js` aria-label fallback assertions.
 
 #### P2 — Documentation, Cleanup & Physical Device Validation
 - [x] **Task 5.8: Sync `README.md` with Completed Phases 1–4 (`tasks.md`)**
