@@ -50,6 +50,7 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
     private JSONObject pendingProposal, pendingSnapshot;
     private String pendingOtpCode;
     private MacroStore.Step pendingMacroStep;
+    private VoiceCommands.DeepLink pendingDeepLink;
     private boolean agentActing, pageLoading;
     private long loadStarted;
     private Runnable continuation;
@@ -230,6 +231,12 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
                                     MacroStore.Step stepToExecute = pendingMacroStep;
                                     pendingMacroStep = null;
                                     executeApprovedMacroStep(stepToExecute);
+                                } else if (pendingDeepLink != null) {
+                                    if (voice != null) voice.playSuccessChime();
+                                    VoiceCommands.DeepLink link = pendingDeepLink;
+                                    pendingDeepLink = null;
+                                    agent.answer("Approved native action via hardware confirmation.");
+                                    launchDeepLink(link);
                                 }
                             }
                         } else if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
@@ -449,6 +456,7 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
         replayingMacro = false;
         activeReplayMacro = null;
         pendingMacroStep = null;
+        pendingDeepLink = null;
         sharing.revoke();
         if (voice != null) voice.stopThinkingPulse();
         requestId++; busy = false; agentActing = false; agent.stop(); guard.clear(); pendingProposal = pendingSnapshot = null;
@@ -748,7 +756,13 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
                 JSONObject snapshot = new JSONObject((String) decoded);
                 if (!sharing.allows(snapshot.getString("site"),provider,nav)) { if (voice != null) voice.stopThinkingPulse(); cancel(); if (voice != null) voice.speak("The page changed. Please ask again."); return; }
                 JSONObject payload = new JSONObject().put("command", text).put("snapshot", snapshot).put("conversation_history", conversation != null ? conversation.snapshot(snapshot.getString("site")) : new JSONArray()).put("current_page",ConversationMemory.page(web.getUrl(),web.getTitle(),navigation)).put("task_history",new JSONArray(agent.history())).put("locale", locale);
-                if (settings.rememberPreferences()) payload.put("user_preferences","Preferred language: " + settings.locale() + "\n" + settings.userPreferences());
+                if (settings.rememberPreferences()) {
+                    StringBuilder prefsText = new StringBuilder("Preferred language: ").append(settings.locale());
+                    if (!settings.userPreferences().isEmpty()) prefsText.append("\n").append(settings.userPreferences());
+                    String facts = UserPreferences.formatFacts(this);
+                    if (!facts.isEmpty()) prefsText.append("\nSaved user facts:\n").append(facts);
+                    payload.put("user_preferences", prefsText.toString());
+                }
                 Bitmap captured = null;
                 if (settings.screenshotsEnabled() && !snapshot.optBoolean("sensitive", false)) {
                     int width = web.getWidth(), height = web.getHeight();
@@ -945,6 +959,19 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
             if (voice != null) voice.speak("AI provider set to OpenAI.");
             return true;
         }
+        if (normalized.matches("(?:please )?(?:read(?: me)? (?:my )?settings|what are my settings|(?:my )?current settings|my settings)")) {
+            if (voice != null) voice.speak(settings.summary()); return true;
+        }
+        if (normalized.matches("forget my facts|clear my facts")) {
+            UserPreferences.clearFacts(this);
+            if (voice != null) voice.speak("Saved facts cleared.");
+            return true;
+        }
+        if (normalized.matches("what facts do you remember|read my facts|what are my facts|my facts")) {
+            String facts = UserPreferences.formatFacts(this);
+            if (voice != null) voice.speak(facts.isEmpty() ? "You have no saved facts." : "Your saved facts: " + facts.replace("\n", ", "));
+            return true;
+        }
         if (normalized.matches("forget my preferences|clear my preferences")) {
             try { settings.saveUserPreferences(""); if (voice != null) voice.speak("Saved preferences cleared."); }
             catch (Exception e) { if (voice != null) voice.speak("I could not clear the saved preferences. Please try again in Settings."); }
@@ -952,6 +979,17 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
         }
         if (normalized.matches("what do you remember about me|read my preferences|my preferences")) {
             if (voice != null) voice.speak(settings.userPreferences().isEmpty() ? "You have no saved preferences." : "Your saved preferences: " + settings.userPreferences()); return true;
+        }
+        UserPreferences.Fact fact = UserPreferences.extractFact(text);
+        if (fact != null) {
+            if (!settings.rememberPreferences()) { if (voice != null) voice.speak("Remembering preferences is off. You can enable it in Settings."); return true; }
+            try {
+                UserPreferences.putFact(this, fact.key(), fact.value());
+                if (voice != null) voice.speak("I will remember your " + fact.key() + " is " + fact.value() + ".");
+            } catch (Exception e) {
+                if (voice != null) voice.speak("I could not save that fact. Please try again.");
+            }
+            return true;
         }
         UserPreferences.Update update = UserPreferences.feedback(text);
         if (update == null) return false;
@@ -988,18 +1026,50 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
         }
         String url = VoiceCommands.navigationUrl(text);
         if (url != null) { cancel(); if (voice != null) voice.speak("Opening " + Uri.parse(url).getHost()); open(url); return true; }
+        VoiceCommands.DeepLink deepLink = VoiceCommands.deepLink(text);
+        if (deepLink != null) {
+            cancel();
+            if (deepLink.requiresConfirmation()) {
+                pendingDeepLink = deepLink;
+                String actionVerb = "tel".equals(deepLink.scheme()) ? "Dial " : "Compose email to ";
+                String summary = actionVerb + deepLink.label();
+                guard.queue(new ActionSafetyGuard.Pending("deep_link_" + deepLink.scheme(), 0L, navigation, SystemClock.elapsedRealtime(), summary));
+                main.postDelayed(() -> {
+                    if (guard.hasPending() && pendingDeepLink == deepLink) {
+                        cancel();
+                        if (voice != null) {
+                            voice.playErrorTone();
+                            voice.speak("Action confirmation timed out for your safety.");
+                        }
+                    }
+                }, ActionSafetyGuard.TIMEOUT_MS);
+                String question = "High-stakes action: " + summary + ". Double-press Volume Up to confirm, or press Volume Down to cancel. Spoken confirmation is not accepted.";
+                remember("Assistant confirmation: " + question);
+                agent.ask();
+                if (voice != null) voice.speak(question);
+            } else {
+                launchDeepLink(deepLink);
+            }
+            return true;
+        }
+        if (VoiceCommands.isSessionReset(text)) {
+            cancel();
+            agent.reset();
+            currentRunSteps.clear();
+            try {
+                if (conversation != null) conversation.clear();
+                boolean explicitClear = command.equals("clear conversation") || command.equals("forget conversation");
+                if (voice != null) voice.speak(explicitClear
+                    ? "Conversation cleared. I have forgotten previous page descriptions and requests."
+                    : "Started fresh. What would you like to do?");
+            }
+            catch (IllegalStateException e) { if (voice != null) voice.speak("Could not clear saved conversation. Please try again."); }
+            return true;
+        }
         switch (command) {
-            case "clear conversation": case "forget conversation":
-                cancel();
-                try {
-                    if (conversation != null) conversation.clear();
-                    if (voice != null) voice.speak("Conversation cleared. I have forgotten previous page descriptions and requests.");
-                }
-                catch (IllegalStateException e) { if (voice != null) voice.speak("Could not clear saved conversation. Please try again."); }
-                return true;
             case "help": case "what can i say": case "what can you do":
                 cancel(); if (voice != null) voice.speak(VoiceCommands.HELP); return true;
-            case "settings": case "open settings": settings(); return true;
+            case "settings": case "open settings": case "open my settings": settings(); return true;
             case "go back": case "back":
                 cancel(); if (web.canGoBack()) web.goBack(); else if (voice != null) voice.speak("There is no previous page."); return true;
             case "scroll down": case "scroll up":
@@ -1021,6 +1091,24 @@ public final class VoiceBrowserActivity extends Activity implements VoiceEngineM
             case "list links": case "read links": readPage("links"); return true;
             case "list buttons": case "read buttons": readPage("buttons"); return true;
             default: return false;
+        }
+    }
+    private void launchDeepLink(VoiceCommands.DeepLink link) {
+        String action = "tel".equals(link.scheme()) ? Intent.ACTION_DIAL : Intent.ACTION_VIEW;
+        Intent intent = new Intent(action, Uri.parse(link.uri()));
+        try {
+            startActivity(intent);
+            if (voice != null) {
+                String spoken = "tel".equals(link.scheme()) ? "Opening dialer for " + link.label()
+                    : "mailto".equals(link.scheme()) ? "Opening email to " + link.label()
+                    : "Opening maps for " + link.label();
+                voice.speak(spoken);
+            }
+        } catch (RuntimeException e) {
+            if (voice != null) {
+                voice.playErrorTone();
+                voice.speak("No app is available on this device to handle that action.");
+            }
         }
     }
     private void readPage(String mode) {

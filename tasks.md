@@ -131,34 +131,34 @@
   - Persist speech rate and audio preferences in `AssistantSettings` so they are restored across app launches.
   - *Status:* **Completed.** `VoiceEngineManager` gained `setSpeechRate(float)`/`getSpeechRate()` clamped to 0.5×–3.0×, applied to TTS on `initialize()` and whenever set. `AssistantSettings` persists `speech_rate` as a float (migrated cleanly). Both `VoiceBrowserActivity.preferenceCommand()` and `SettingsActivity.updateSettingByVoice()` handle *"speak faster"*, *"speak slower"*, *"normal speech"*, and *"set speech rate to N"*. Speech rate and tones are both reloaded from settings on `onCreate`/`onResume`. Verified with new `speechRateDefaultsToOneAndClampsToRange` test in `VoiceEngineManagerTest`; all 20 unit tests pass.
 
-- [ ] **Task 7.2: Voice-Controlled Privacy & AI Feature Toggles (`AssistantSettings.java`, `VoiceBrowserActivity.java`, & `VoiceCommands.java`)**
+- [x] **Task 7.2: Voice-Controlled Privacy & AI Feature Toggles (`AssistantSettings.java`, `VoiceBrowserActivity.java`, & `VoiceCommands.java`)**
   - Enable toggling all boolean settings by voice without requiring visual navigation to `SettingsActivity`:
     - "Enable/disable page sharing" (`settings.saveSharingEnabled()`)
     - "Enable/disable screenshots" (`settings.saveScreenshotsEnabled()`)
     - "Enable/disable remembering preferences" (`settings.saveRememberPreferences()`)
   - Add voice query to inspect active settings: "Read my settings" or "What are my settings?" to speak the state of toggles, provider, and speech rate.
-  - *Status:* **Pending.**
+  - *Status:* **Completed.** `AssistantSettings.summary()` provides the full spoken summary (provider, model, language, speech speed, page sharing, screenshots, remember preferences, audio tones). Both `VoiceBrowserActivity.preferenceCommand()` and `SettingsActivity.updateSettingByVoice()` toggle `sharingEnabled`, `screenshotsEnabled`, `rememberPreferences`, and `audioTonesEnabled` and respond to *"read my settings"* / *"what are my settings"* (without intercepting *"open my settings"*). Verified in `SettingsActivityTest.java` and `Phase7VoiceTest.java`.
 
-- [ ] **Task 7.3: Form Auto-Fill Facts & Profile Preferences ("Remember my Consumer ID") (`UserPreferences.java` & `AssistantClient.java`)**
+- [x] **Task 7.3: Form Auto-Fill Facts & Profile Preferences ("Remember my Consumer ID") (`UserPreferences.java` & `AssistantClient.java`)**
   - Extend `UserPreferences` to capture and store key-value user facts (e.g., "remember my consumer ID is 12345", "remember my voter ID is ABC...", "remember my email is user@example.com").
   - Encrypt facts locally via `KeystoreCryptoHelper` and inject into `user_preferences` system prompt.
   - Instruct `AssistantClient` to utilize remembered user facts when filling forms on matching portals without reprompting the user.
   - Add voice commands to inspect or clear stored facts: "What facts do you remember?", "Forget my facts".
-  - *Status:* **Pending.**
+  - *Status:* **Completed.** Added `UserPreferences.extractFact()`, `loadFacts()`, `saveFacts()`, `putFact()`, `clearFacts()`, and `formatFacts()` backed by `KeystoreCryptoHelper` AES-GCM encryption (rejecting sensitive keys like password/otp/cvv/pin). Updated `AssistantClient.INSTRUCTIONS` to fill matching form fields using saved profile facts without reprompting. `VoiceBrowserActivity` injects saved facts into `user_preferences` when `rememberPreferences()` is enabled and handles *"what facts do you remember"* and *"forget my facts"*. Verified in `tests/UserPreferencesTest.java` and `Phase7VoiceTest.java`.
 
-- [ ] **Task 7.4: Voice Session Reset / "Start Fresh" (`VoiceCommands.java` & `VoiceBrowserActivity.java`)**
+- [x] **Task 7.4: Voice Session Reset / "Start Fresh" (`VoiceCommands.java` & `VoiceBrowserActivity.java`)**
   - Add voice aliases ("start fresh", "new session", "reset assistant") to `VoiceCommands.java` alongside "clear conversation".
   - Wipes short-term page task history (`agent.stop()`), clears `ConversationMemory`, clears pending states, and speaks verbal confirmation: *"Started fresh. What would you like to do?"*
-  - *Status:* **Pending.**
+  - *Status:* **Completed.** Added `VoiceCommands.isSessionReset()` matching *"start fresh"*, *"new session"*, *"reset assistant"*, *"start a new session"*, *"start over"*, *"clear conversation"*, and *"forget conversation"*, plus `AgentSession.reset()`. `VoiceBrowserActivity.localCommand()` cancels pending states, resets `AgentSession`, clears `currentRunSteps` and `ConversationMemory`, and speaks *"Started fresh. What would you like to do?"*. Verified in `tests/VoiceCommandsTest.java` and `Phase7VoiceTest.java`.
 
-- [ ] **Task 7.5: Native Intent Deep-Link Handling (`VoiceCommands.java` & `VoiceBrowserActivity.java`)**
+- [x] **Task 7.5: Native Intent Deep-Link Handling (`VoiceCommands.java` & `VoiceBrowserActivity.java`)**
   - Expand `VoiceCommands` to detect dialer, map, and mail intent schemes (`tel:`, `geo:`, `mailto:`, e.g., "call 9876543210", "navigate to Bangalore City Railway Station").
   - Launch standard Android intents (`Intent.ACTION_DIAL`, `Intent.ACTION_VIEW`) directly rather than sending them to the LLM browser loop.
   - Gate outgoing phone calls or direct communications behind `ActionSafetyGuard` confirmation if they trigger immediate dialing/action.
-  - *Status:* **Pending.**
+  - *Status:* **Completed.** Added `VoiceCommands.deepLink()` parsing `tel:`, `geo:`, and `mailto:` URIs as well as spoken call, navigation, and email phrases (deferring web hostnames to `navigationUrl()`). `VoiceBrowserActivity` launches `Intent.ACTION_VIEW` directly for `geo:` maps and gates `tel:` (`Intent.ACTION_DIAL`) and `mailto:` (`Intent.ACTION_VIEW`) behind `ActionSafetyGuard` Volume Up double-press confirmation. Verified in `tests/VoiceCommandsTest.java` and `Phase7VoiceTest.java`.
 
-- [ ] **Task 7.6: Automated Unit & Integration Tests for Phase 7**
+- [x] **Task 7.6: Automated Unit & Integration Tests for Phase 7**
   - Unit-test voice setting parsing (speech rate adjustments, toggling sharing/screenshots/audio tones).
   - Unit-test fact extraction and Keystore encryption round-trip in `UserPreferences`.
   - Unit-test deep-link intent resolution in `VoiceCommands`.
-  - *Status:* **Pending.**
+  - *Status:* **Completed.** Expanded `SettingsActivityTest.java`, `tests/VoiceCommandsTest.java`, and `tests/UserPreferencesTest.java`, and added `Phase7VoiceTest.java` covering settings toggles/summary, encrypted facts round-trip, session reset, and `tel:`/`geo:`/`mailto:` deep-link intent resolution with hardware safety gating. All 78 unit tests across 14 suites pass via `./gradlew testDebugUnitTest`.

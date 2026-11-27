@@ -32,4 +32,5 @@ public final class AgentSession {
     }
     private void add(String entry) { if (history.size() >= 16) history.remove(0); history.add(entry.substring(0,Math.min(2000,entry.length()))); }
     public void stop() { running = false; waiting = false; }
+    public void reset() { stop(); goal = ""; userInstructions = ""; steps = failures = repeats = 0; lastAction = ""; history.clear(); }
 }

@@ -437,6 +437,9 @@ public class SettingsActivity extends Activity implements VoiceEngineManager.Cal
             voice.speak("Sharing approvals cleared.");
             return true;
         }
+        if (norm.matches("(?:please )?(?:read(?: me)? (?:my )?settings|what are my settings|(?:my )?current settings|my settings)")) {
+            voice.speak(settings.summary()); return true;
+        }
         if (norm.matches(".*(save settings|save|apply).*")) {
             try {
                 String secret = key.getText().toString().trim();

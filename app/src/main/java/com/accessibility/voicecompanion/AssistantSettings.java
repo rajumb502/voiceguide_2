@@ -56,6 +56,17 @@ public final class AssistantSettings {
     public boolean rememberPreferences() { return prefs.getBoolean("remember_preferences", true); }
     public boolean audioTonesEnabled() { return prefs.getBoolean("audio_tones", true); }
     public float speechRate() { return prefs.getFloat("speech_rate", 1.0f); }
+    public String summary() {
+        String p = provider();
+        return String.format(java.util.Locale.ROOT,
+            "AI provider: %s, model: %s. Language: %s. Speech speed: %.1f times. "
+            + "Page sharing: %s. Screenshots: %s. Remember preferences: %s. Audio tones: %s.",
+            p, model(p), locale(), speechRate(),
+            sharingEnabled() ? "on" : "off",
+            screenshotsEnabled() ? "on" : "off",
+            rememberPreferences() ? "on" : "off",
+            audioTonesEnabled() ? "on" : "off");
+    }
     public String userPreferences() { return prefs.getString("user_preferences", ""); }
     public boolean allSitesAllowed(String provider) { return prefs.getBoolean(provider + ".share_all_sites",false); }
     public Set<String> approvedSites(String provider) { return new TreeSet<>(prefs.getStringSet(provider + ".approved_sites",java.util.Collections.emptySet())); }

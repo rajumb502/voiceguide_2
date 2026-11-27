@@ -54,12 +54,57 @@ public class SettingsActivityTest {
     }
 
     @Test
-    public void testVoiceSettingsToggle() {
-        activity.command("turn off tones");
+    public void testReadMySettingsContainsKeyFields() {
         AssistantSettings settings = new AssistantSettings(activity);
-        assertFalse(settings.audioTonesEnabled());
+        String summary = settings.summary();
+        assertTrue(summary.contains("AI provider:"));
+        assertTrue(summary.contains("Speech speed:"));
+        assertTrue(summary.contains("Page sharing:"));
+        assertTrue(summary.contains("Screenshots:"));
+        assertTrue(summary.contains("Remember preferences:"));
+        assertTrue(summary.contains("Audio tones:"));
 
+        assertTrue(activity.updateSettingByVoice("read my settings"));
+        assertTrue(activity.updateSettingByVoice("what are my settings?"));
+        assertFalse(activity.updateSettingByVoice("open my settings"));
+    }
+
+    @Test
+    public void testSpeechRateVoiceCommands() {
+        AssistantSettings settings = new AssistantSettings(activity);
+        float before = settings.speechRate();
+        activity.command("speak faster");
+        assertEquals(before + 0.25f, settings.speechRate(), 0.001f);
+        activity.command("speak slower");
+        assertEquals(before, settings.speechRate(), 0.001f);
+        activity.command("set speech rate to 2");
+        assertEquals(2.0f, settings.speechRate(), 0.001f);
+        activity.command("normal speech");
+        assertEquals(1.0f, settings.speechRate(), 0.001f);
+    }
+
+    @Test
+    public void testVoiceSettingsToggle() {
+        AssistantSettings settings = new AssistantSettings(activity);
+
+        activity.command("turn off tones");
+        assertFalse(settings.audioTonesEnabled());
         activity.command("turn on tones");
         assertTrue(settings.audioTonesEnabled());
+
+        activity.command("disable page sharing");
+        assertFalse(settings.sharingEnabled());
+        activity.command("enable page sharing");
+        assertTrue(settings.sharingEnabled());
+
+        activity.command("disable screenshots");
+        assertFalse(settings.screenshotsEnabled());
+        activity.command("enable screenshots");
+        assertTrue(settings.screenshotsEnabled());
+
+        activity.command("disable remembering preferences");
+        assertFalse(settings.rememberPreferences());
+        activity.command("enable remembering preferences");
+        assertTrue(settings.rememberPreferences());
     }
 }
